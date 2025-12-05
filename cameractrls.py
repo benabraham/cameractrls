@@ -1261,6 +1261,149 @@ class KiyoProCtrls:
     def get_ctrls(self):
         return self.ctrls
 
+# Insta360 Link Extension Unit GUID faf1672d-b71b-4793-8c91-7b1c9b7f95f8 (little endian)
+INSTA360_LINK_GUID = b'\x2d\x67\xf1\xfa\x1b\xb7\x93\x47\x8c\x91\x7b\x1c\x9b\x7f\x95\xf8'
+INSTA360_LINK_USB_ID = '2e1a:4c01'
+
+# Insta360 Link selectors
+INSTA360_LINK_SEL_EXP_MODE = 0x1e  # 1 byte: exposure mode
+INSTA360_LINK_SEL_EXP_TIME = 0x19  # 2 bytes LE: exposure time in microseconds
+INSTA360_LINK_SEL_GAIN = 0x1b      # 2 bytes LE: gain (0-100 safe range)
+
+# Exposure mode values (1 byte)
+INSTA360_LINK_EXP_MANUAL = b'\x01'
+INSTA360_LINK_EXP_AUTO = b'\x02'
+INSTA360_LINK_EXP_AUTO_FAST = b'\x03'
+INSTA360_LINK_EXP_AUTO_SLOW = b'\x04'
+
+# Shutter speed presets: (label, microseconds)
+INSTA360_LINK_SHUTTER_PRESETS = [
+    ('1/30s', 33333),
+    ('1/60s', 16667),
+    ('1/125s', 8000),
+    ('1/250s', 4000),
+    ('1/500s', 2000),
+    ('1/1000s', 1000),
+    ('1/2000s', 500),
+    ('1/4000s', 250),
+]
+
+def insta360_link_shutter_format(scale, value):
+    idx = int(value)
+    if 0 <= idx < len(INSTA360_LINK_SHUTTER_PRESETS):
+        return INSTA360_LINK_SHUTTER_PRESETS[idx][0]
+    return f'{idx}'
+
+class Insta360LinkCtrls:
+    def __init__(self, device, fd):
+        self.device = device
+        self.fd = fd
+        self.unit_id = find_unit_id_in_sysfs(device, INSTA360_LINK_GUID)
+        self.usb_ids = find_usb_ids_in_sysfs(device)
+        self.get_device_controls()
+
+    def supported(self):
+        return self.unit_id != 0 and self.usb_ids == INSTA360_LINK_USB_ID
+
+    def get_device_controls(self):
+        if not self.supported():
+            self.ctrls = []
+            return
+
+        self.ctrls = [
+            BaseCtrl(
+                'insta360_link_exposure_mode',
+                'Exposure Mode',
+                'menu',
+                tooltip='Insta360 Link exposure mode. Set to manual to control shutter and gain.',
+                menu=[
+                    BaseCtrlMenu('auto', 'Auto', INSTA360_LINK_EXP_AUTO),
+                    BaseCtrlMenu('manual', 'Manual', INSTA360_LINK_EXP_MANUAL),
+                ],
+                default='auto',
+            ),
+            BaseCtrl(
+                'insta360_link_shutter',
+                'Shutter Speed',
+                'integer',
+                tooltip='Insta360 Link shutter speed. Only works in manual exposure mode.',
+                min=0,
+                max=len(INSTA360_LINK_SHUTTER_PRESETS) - 1,
+                step=1,
+                default=1,  # 1/60s
+                format_value=insta360_link_shutter_format,
+                scale_class='dark-to-light',
+            ),
+        ]
+
+        # Read current values from device
+        exp_mode_ctrl = find_by_text_id(self.ctrls, 'insta360_link_exposure_mode')
+        shutter_ctrl = find_by_text_id(self.ctrls, 'insta360_link_shutter')
+
+        # Read exposure mode
+        buf = to_buf(bytes(1))
+        query_xu_control(self.fd, self.unit_id, INSTA360_LINK_SEL_EXP_MODE, UVC_GET_CUR, buf)
+        for m in exp_mode_ctrl.menu:
+            if m.value == buf.raw[:1]:
+                exp_mode_ctrl.value = m.text_id
+                break
+        if exp_mode_ctrl.value is None:
+            exp_mode_ctrl.value = 'auto'
+
+        # Hide shutter if not in manual mode
+        shutter_ctrl.hidden = (exp_mode_ctrl.value != 'manual')
+
+        # Read shutter value and find closest preset index
+        buf = to_buf(bytes(2))
+        query_xu_control(self.fd, self.unit_id, INSTA360_LINK_SEL_EXP_TIME, UVC_GET_CUR, buf)
+        current_us = int.from_bytes(buf.raw[:2], 'little')
+        closest_idx = 1  # default to 1/60s
+        closest_diff = float('inf')
+        for idx, (label, us) in enumerate(INSTA360_LINK_SHUTTER_PRESETS):
+            diff = abs(us - current_us)
+            if diff < closest_diff:
+                closest_diff = diff
+                closest_idx = idx
+        shutter_ctrl.value = closest_idx
+
+    def setup_ctrls(self, params, errs):
+        if not self.supported():
+            return
+
+        for k, v in params.items():
+            ctrl = find_by_text_id(self.ctrls, k)
+            if ctrl is None:
+                continue
+
+            if ctrl.text_id == 'insta360_link_exposure_mode':
+                menu = find_by_text_id(ctrl.menu, v)
+                if menu is None:
+                    collect_warning(f'Insta360LinkCtrls: can\'t find {v} in {[m.text_id for m in ctrl.menu]}', errs)
+                    continue
+                query_xu_control(self.fd, self.unit_id, INSTA360_LINK_SEL_EXP_MODE, UVC_SET_CUR, to_buf(menu.value))
+                ctrl.value = menu.text_id
+                # Update shutter visibility
+                shutter_ctrl = find_by_text_id(self.ctrls, 'insta360_link_shutter')
+                if shutter_ctrl:
+                    shutter_ctrl.hidden = (menu.text_id != 'manual')
+
+            elif ctrl.text_id == 'insta360_link_shutter':
+                try:
+                    idx = int(v)
+                except ValueError:
+                    collect_warning(f'Insta360LinkCtrls: invalid shutter index {v}', errs)
+                    continue
+                if idx < 0 or idx >= len(INSTA360_LINK_SHUTTER_PRESETS):
+                    collect_warning(f'Insta360LinkCtrls: shutter index {idx} out of range', errs)
+                    continue
+                us = INSTA360_LINK_SHUTTER_PRESETS[idx][1]
+                buf = to_buf(us.to_bytes(2, 'little'))
+                query_xu_control(self.fd, self.unit_id, INSTA360_LINK_SEL_EXP_TIME, UVC_SET_CUR, buf)
+                ctrl.value = idx
+
+    def get_ctrls(self):
+        return self.ctrls
+
 # Logitech peripheral GUID ffe52d21-8030-4e2c-82d9-f587d00540bd
 LOGITECH_PERIPHERAL_GUID = b'\x21\x2d\xe5\xff\x30\x80\x2c\x4e\x82\xd9\xf5\x87\xd0\x05\x40\xbd'
 
@@ -3129,6 +3272,7 @@ class CameraCtrls:
             LogitechCtrls(device, fd),
             DellUltraSharpCtrls(device, fd),
             AnkerWorkCtrls(device, fd),
+            Insta360LinkCtrls(device, fd),
             SystemdSaver(self),
             ColorPreset(self),
             ConfigPreset(self),
@@ -3235,7 +3379,7 @@ class CameraCtrls:
                     pop_list_by_text_ids(ctrls, ['kiyo_pro_af_mode', 'logitech_motor_focus', 'ankerwork_face_focus'])
                 ),
             ]),
-            CtrlPage('Exposure', [
+            CtrlPage('Test', [
                 CtrlCategory('Exposure', pop_list_by_ids(ctrls, [
                     V4L2_CID_EXPOSURE_AUTO,
                     V4L2_CID_EXPOSURE_ABSOLUTE,
@@ -3256,7 +3400,9 @@ class CameraCtrls:
                     V4L2_CID_3A_LOCK,
                     V4L2_CID_CAMERA_ORIENTATION,
                     V4L2_CID_CAMERA_SENSOR_ROTATION,
-                ])),
+                ]) +
+                    pop_list_by_text_ids(ctrls, ['insta360_link_exposure_mode', 'insta360_link_shutter'])
+                ),
                 CtrlCategory('ISO', pop_list_by_ids(ctrls, [V4L2_CID_ISO_SENSITIVITY, V4L2_CID_ISO_SENSITIVITY_AUTO])),
                 CtrlCategory('Dynamic Range',
                     pop_list_by_ids(ctrls, [

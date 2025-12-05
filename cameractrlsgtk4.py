@@ -310,6 +310,7 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
                 for c in cat.ctrls:
                     ctrl_row = Gtk.ListBoxRow()
                     ctrls_listbox.append(ctrl_row)
+                    c.gui_row = ctrl_row  # Store row reference for visibility control
 
                     ctrl_box = Gtk.Box(margin_start=5, margin_end=5, height_request=45)
                     ctrl_row.set_child(ctrl_box)
@@ -523,6 +524,9 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
             self.update_ctrl_state(c)
 
     def update_ctrl_state(self, c):
+        # Hide control row if hidden attribute is set
+        if hasattr(c, 'gui_row') and hasattr(c, 'hidden'):
+            c.gui_row.set_visible(not c.hidden)
         for gui_ctrl in c.gui_ctrls:
             gui_ctrl.set_sensitive(not c.inactive and not c.readonly)
         if c.gui_default_btn is not None:
