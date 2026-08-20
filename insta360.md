@@ -265,6 +265,54 @@ What it establishes:
 Anything still unmapped should be looked for here first: turn the knob in the app on
 Windows, then read the log line it produced.
 
+## 🧬 THE CAMERA API SURFACE, STRAIGHT FROM THE BINARY
+
+`Webcam::CameraInsta::*` symbols survive in the exe, so the vendor's own camera class is
+readable. 98 methods; these are the ones with no Linux equivalent yet:
+
+| Method | What it implies |
+|---|---|
+| `setHdrChecked` | **HDR is a camera-side setting**, and no XU selector is named for it — so it rides inside another selector, most likely a bit of 0x1b |
+| `setAntiFlash` | anti-flicker |
+| `setAudioDenoise`, `setAudioCaptureMode` | the mic, matching XU_NOISE_CANCEL at 0x07 |
+| `setPrivacyModeChecked`, `setUltiPrivacyModeChecked` | two privacy levels, the second logged as "ExtremePrivacy" |
+| `setHorizontalCorrectionChecked` | the Horizontal fine-tuning slider, fits XU_BIAS at 0x18 |
+| `setCompositionType` | Head / Half Body / Whole Body, fits XU_LAYOUT_STYLE at 0x13 |
+| `setSmartAdjustmentChecked`, `setAiZoomChecked` | More tab toggles |
+| `setMirrorChecked`, `setVerticallyMirrorChecked` | H and V flip, neither exposed over V4L2 here |
+| `setForcedVertical`, `setVerticalModeEnabled`, `setLowResolution` | the Compatibility settings |
+| `setRoll`, `setPitch`, `setHostPTZ`, `addPanTilt`, `savePTZ`, `resetPTZ` | gimbal, including preset save |
+| `setUseGestureRock`, `setUseGestureOK` | **two gestures beyond palm/L/V**, not shown in this camera's UI |
+| `ResetLink1Camera` | an explicit gen 1 code path, separate from `ResetPUC2CameraLower` |
+
+Model-gated features are listed as `support*` flags: AiDenoise, AllowHostAdjustVolume,
+AreaTrack, AudioCaptureMode, AutoFraming, AutoTrack, AutoTrackingTriggeredByCamera, Beauty,
+BlurModeList, ForcedVerticalAndRollAdjustment, Highlighting, HorizontalCorrection,
+ImageTemplate, Mirrorvertically, PTZDrag, PrivacyMode, RollAdjustment,
+SetStartupParamsToCamera, SmartAdjustment, SoundWall, SpeakTracking, SuperBokeh, TrackSpeed,
+VirtualCamera, Vulkan. **HDR is not among them**, so it is not model-gated — the gen 1 Link
+has it, which matches the HDR toggle in its Effects tab.
+
+### Two protocols, don't confuse them
+
+- **`ControlSelector` (XU_*)** — app to camera, over the UVC extension unit. That is the
+  table above and the only thing cameractrls can speak.
+- **`ParamType` (PARAM_*)** — the WebSocket protocol the app serves for its own remote
+  control, carrying protobuf `ControlRequest` / `ValueChangeNotification` messages. Those
+  ids are not selectors. A feature appearing only as a PARAM_ still has to reach the camera
+  through some XU selector.
+
+Worth noting: 0x0e XU_DEVICE_PARAM_CONTROL reports **write-only** in GET_INFO, and 0x08 is
+502 bytes and constantly changing. A command-in / notification-out channel pair is the
+obvious reading, and would explain why features like HDR have no selector of their own.
+
+### How to redo this on an app update
+
+```bash
+grep -a -o 'Webcam::CameraInsta::[A-Za-z0-9_]*' 'Insta360 Link Controller.exe' | sort -u
+grep -a -o 'support[A-Z][A-Za-z0-9]*' 'Insta360 Link Controller.exe' | sort -u
+```
+
 ## 🪟 OFFICIAL WINDOWS UI — COMPLETE OPTION INVENTORY
 
 Source: 8 screenshots of **Insta360 Link Controller** taken 2025-12-10, this camera
