@@ -2153,33 +2153,32 @@ INSTA360_FUNC_STATUS_SELECTOR = 0x1B
 INSTA360_FUNC_STATUS_LENGTH = 2
 INSTA360_FUNC_STATUS_BIT_GESTURE_ALL = 0x10
 
-## Manual exposure, gen 1 Link only (XU_EXPOSURE_MODE 0x1E, XU_EXPOSURE_TIME 0x19)
+## Manual exposure, gen 1 Link only
+## XU_AE_MODE_CONTROL 0x1E, XU_ISO_CONTROL 0x19, XU_EXPOSURE_TIME_ABSOLUTE_CONTROL 0x1D
 INSTA360_EXPOSURE_MODE_SELECTOR = 0x1e
 INSTA360_EXPOSURE_MODE_LENGTH = 1
 
 INSTA360_EXPOSURE_MODE_MANUAL = 1
 INSTA360_EXPOSURE_MODE_AUTO = 2
 
-INSTA360_EXPOSURE_TIME_SELECTOR = 0x19
+INSTA360_ISO_SELECTOR = 0x19
+INSTA360_ISO_LENGTH = 2
+INSTA360_ISO_MIN = 100
+INSTA360_ISO_MAX = 3200
+INSTA360_ISO_DEFAULT = 100
+
+# The exposure time is the shutter denominator, 60 meaning 1/60s, matching the vendor app.
+# The firmware quantises what it accepts, 30 reads back as 29 and 120 as 119.
+INSTA360_EXPOSURE_TIME_SELECTOR = 0x1d
 INSTA360_EXPOSURE_TIME_LENGTH = 2
 
-# exposure time in microseconds, only settable while the exposure mode is manual
-INSTA360_SHUTTER_PRESETS = [
-    ('1/30s', 33333),
-    ('1/60s', 16667),
-    ('1/125s', 8000),
-    ('1/250s', 4000),
-    ('1/500s', 2000),
-    ('1/1000s', 1000),
-    ('1/2000s', 500),
-    ('1/4000s', 250),
-]
+INSTA360_SHUTTER_PRESETS = [30, 60, 125, 250, 500, 1000, 2000, 4000, 8000]
 INSTA360_SHUTTER_DEFAULT = 1  # 1/60s
 
 def insta360_shutter_format(scale, value):
     idx = int(value)
     if 0 <= idx < len(INSTA360_SHUTTER_PRESETS):
-        return INSTA360_SHUTTER_PRESETS[idx][0]
+        return f'1/{INSTA360_SHUTTER_PRESETS[idx]}s'
     return f'{idx}'
 
 class Insta360Ctrl(BaseCtrl):
@@ -2323,6 +2322,20 @@ class Insta360Ctrls:
                     format_value=insta360_shutter_format,
                     scale_class='dark-to-light',
                 ),
+                Insta360Ctrl(
+                    'insta360_iso',
+                    'ISO',
+                    'integer',
+                    'Sensor sensitivity, only effective in manual exposure mode',
+                    INSTA360_ISO_SELECTOR,
+                    INSTA360_ISO_LENGTH,
+                    min=INSTA360_ISO_MIN,
+                    max=INSTA360_ISO_MAX,
+                    step=1,
+                    step_big=100,
+                    default=INSTA360_ISO_DEFAULT,
+                    scale_class='dark-to-light',
+                ),
             ]
 
         gesture_mask = self.read(INSTA360_GESTURE_SELECTOR, INSTA360_GESTURE_LENGTH)[0]
@@ -2347,20 +2360,26 @@ class Insta360Ctrls:
                 c.value = valmenu.text_id if valmenu else 'auto'
             elif c.text_id == 'insta360_shutter':
                 c.value = self.closest_shutter(int.from_bytes(buf[:2], byteorder='little'))
+            elif c.text_id == 'insta360_iso':
+                iso = int.from_bytes(buf[:2], byteorder='little')
+                c.value = max(c.min, min(c.max, iso))
 
         self.update_shutter_visibility()
 
-    def closest_shutter(self, us):
-        diffs = [abs(preset_us - us) for _, preset_us in INSTA360_SHUTTER_PRESETS]
+    # the firmware quantises the denominator, so match the nearest preset rather than ==
+    def closest_shutter(self, denominator):
+        diffs = [abs(preset - denominator) for preset in INSTA360_SHUTTER_PRESETS]
         return diffs.index(min(diffs))
 
     # the shutter speed is ignored outside manual exposure mode, so don't offer it there
     def update_shutter_visibility(self):
-        shutter_ctrl = find_by_text_id(self.ctrls, 'insta360_shutter')
         mode_ctrl = find_by_text_id(self.ctrls, 'insta360_exposure_mode')
-        if shutter_ctrl is None or mode_ctrl is None:
+        if mode_ctrl is None:
             return
-        shutter_ctrl.hidden = mode_ctrl.value != 'manual'
+        for text_id in ('insta360_shutter', 'insta360_iso'):
+            ctrl = find_by_text_id(self.ctrls, text_id)
+            if ctrl is not None:
+                ctrl.hidden = mode_ctrl.value != 'manual'
 
     def setup_ctrls(self, params, errs):
         if not self.supported():
@@ -2400,9 +2419,13 @@ class Insta360Ctrls:
                     if idx < 0 or idx >= len(INSTA360_SHUTTER_PRESETS):
                         collect_warning(f'Insta360Ctrls: shutter index {idx} out of range', errs)
                         continue
-                    us = INSTA360_SHUTTER_PRESETS[idx][1]
-                    self.write(ctrl.selector, us.to_bytes(ctrl.length, byteorder='little'))
+                    denominator = INSTA360_SHUTTER_PRESETS[idx]
+                    self.write(ctrl.selector, denominator.to_bytes(ctrl.length, byteorder='little'))
                     ctrl.value = idx
+                elif ctrl.text_id == 'insta360_iso':
+                    iso = max(ctrl.min, min(ctrl.max, int(v)))
+                    self.write(ctrl.selector, iso.to_bytes(ctrl.length, byteorder='little'))
+                    ctrl.value = iso
                 else:
                     val_int = int(v)
                     self.write(ctrl.selector, val_int.to_bytes(ctrl.length, byteorder='little', signed=True))
@@ -3592,7 +3615,8 @@ class CameraCtrls:
                 ]) +
                     pop_list_by_text_ids(ctrls, ['insta360_exposure_mode', 'insta360_shutter'])
                 ),
-                CtrlCategory('ISO', pop_list_by_ids(ctrls, [V4L2_CID_ISO_SENSITIVITY, V4L2_CID_ISO_SENSITIVITY_AUTO])),
+                CtrlCategory('ISO', pop_list_by_ids(ctrls, [V4L2_CID_ISO_SENSITIVITY, V4L2_CID_ISO_SENSITIVITY_AUTO]) +
+                    pop_list_by_text_ids(ctrls, ['insta360_iso'])),
                 CtrlCategory('Dynamic Range',
                     pop_list_by_ids(ctrls, [
                         V4L2_CID_BACKLIGHT_COMPENSATION,
