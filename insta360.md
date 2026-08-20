@@ -172,6 +172,73 @@ in the background. The exposure results below were taken with a preview open, so
 
 ---
 
+## 🪟 OFFICIAL WINDOWS UI — COMPLETE OPTION INVENTORY
+
+Source: 8 screenshots of **Insta360 Link Controller** taken 2025-12-10, this camera
+(serial IBJLA23066B543). They live in `../` (one level above this repo, untracked):
+`Screenshot 2025-12-10 2003 50 / 2004 20 / 2004 34 / 2005 02 / 2005 25 / 2005 39 / 2005 54 / 2006 27.png`,
+originals also at `/mnt/winos/Users/DanielSrb/Downloads/`.
+
+This is the full set of options the vendor app offers, i.e. the ceiling for what the
+firmware can do. Everything not already covered by V4L2 has to come from an XU.
+
+### View tab
+
+| Option | Values seen | Linux status |
+|---|---|---|
+| View Adjustment: pan / tilt d-pad | — | ✅ V4L2 `pan_absolute` / `tilt_absolute` |
+| View Adjustment: zoom | 1.2x shown | ✅ V4L2 `zoom_absolute` (100-400) |
+| Presets | user-added slots (+) | 🔍 unit 10 selectors 0x03-0x05 suspected |
+| Smart Composition | toggle | 🔍 unmapped |
+| Composition framing | Head / Half Body / Whole Body | 🔍 unmapped |
+| **Tracking Speed** | **Quick / Ordinary / Slow** | ✅ selector 0x12 (1/2/3) |
+| Enable Auto Tracking | toggle | 🔍 unmapped (likely a 0x1b bit) |
+
+Note the official names are **Quick / Ordinary / Slow**, PR #101 labels them fast /
+medium / slow. Which integer maps to which is still unproven on gen 1.
+
+### Effects tab (Color)
+
+| Option | Values seen | Linux status |
+|---|---|---|
+| Exposure | Auto / M switch | ✅ selector 0x1e |
+| — Auto: EV bias | **0.0EV .. 3.0EV** (±3 EV) | ⚠️ selector 0x09 reports -4..+4, writes stick but showed no luminance change |
+| — Manual: ISO | **100 .. 3200** | ❌ selector unknown (0x1b was a misread) |
+| — Manual: Shutter | **1/8000s .. 1/30s** | ✅ selector 0x19 (µs) |
+| — Manual: Exposure curve | editable curve + reset | 🔍 **selector 0x10 (255 byte table) is the prime suspect** |
+| Auto Focus | Auto / M + 0-100% | ✅ V4L2 `focus_automatic_continuous` / `focus_absolute` |
+| Temperature | Auto / M + **2000K .. 10000K** | ✅ V4L2 `white_balance_temperature` |
+| Brightness / Contrast / Saturation / Sharpness | 0-100% | ✅ V4L2 |
+| HDR | toggle | 🔍 **selector 0x07 (1 byte, settable, effect unknown) is the prime suspect** |
+| Anti-Flicker | dropdown, Auto | ✅ V4L2 `power_line_frequency` (roughly) |
+| Set as startup | toggle | host-side app setting, not a camera control |
+
+### More tab
+
+| Option | Values seen | Linux status |
+|---|---|---|
+| **Gesture** master switch | on | ✅ selector 0x1b bit 0x10 |
+| — AI Tracking gesture | checkbox | ✅ 0x05 bit 0x02 (palm) |
+| — Whiteboard gesture | checkbox | ✅ 0x05 bit 0x08 (V) |
+| — Zoom gesture | checkbox | ✅ 0x05 bit 0x04 (L) |
+| Horizontal Flip | checkbox | 🔍 unmapped (no V4L2 hflip on this camera) |
+| Smart Adjustment | checkbox | 🔍 unmapped |
+| Horizontal fine-tuning | slider, centre 0, reset | 🔍 unmapped |
+| Portrait Resolution and High Frame rate | checkbox (Compatibility) | 🔍 unmapped, probably re-enumerates formats |
+
+### Bottom bar
+
+Mode buttons **AI Tracking / Whiteboard / Overhead / DeskView**, resolution selector
+(1080p30), snapshot, record. The four modes are almost certainly bits in the 0x1b
+function status word — the same word the gesture master switch lives in.
+
+### Not camera controls at all
+
+`%LOCALAPPDATA%/Insta360/Insta360 Link Controller/virtual_camera_params.json` shows
+beauty, background replace, bokeh/blur and spot are **host-side processing** on a
+virtual camera, not firmware features. Don't go looking for XU selectors for those.
+`en-US.json` in that folder is the full UI string table if more option names are needed.
+
 ## 📋 WINDOWS FEATURES TO MAP
 
 From Windows Link Controller software:
