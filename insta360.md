@@ -441,50 +441,85 @@ UVCIOC_CTRL_QUERY = 0xc0107521
 
 ---
 
-## 📋 ALL UNIT 9 SELECTORS (Complete Map)
+## 📋 UNIT 9 SELECTORS — AUTHORITATIVE MAP
 
-| Sel | Size | RW | Default | Purpose |
-|-----|------|-----|---------|---------|
-| 0x01 | 4B | RW | 0 | Unknown |
-| 0x02 | 52B | RW | complex | Unknown |
-| 0x03 | 170B | RO | info | Device info (serial, firmware) |
-| 0x05 | 1B | RW | 0x0e | **Gesture bitmask** (palm 0x02, L 0x04, V 0x08) ✅ |
-| 0x06 | 5B | RW | zeros | Unknown |
-| 0x07 | 1B | RW | 1 | Toggle, settable, **no measurable image effect** (not HDR?) |
-| 0x09 | 2B | RW | 0 | **Exposure bias**, signed, **0.01 EV units, ±300 = ±3.00 EV** ✅ |
-| 0x0a | 129B | RW | zeros | Unknown |
-| 0x0b | 5B | RO | varies | Status |
-| 0x0c | 32B | RO | model | **Serial / model ID** string ✅ |
-| 0x0d | 129B | RW | hash | Unknown |
-| 0x0e | 1B | RW | - | Unknown |
-| 0x0f | 12B | RW | varies | Unknown |
-| 0x10 | 255B | RO* | ramp | **Exposure curve LUT**, 127 u16 LE identity ramp, writes revert |
-| 0x11 | 1B | RO | 0 | Status (not settable) |
-| 0x12 | 1B | RW | 1 | **Tracking speed** 1=slow 2=medium 3=fast ✅ |
-| 0x13 | 1B | RO | 1 | Status (not settable) |
-| 0x14 | 240B | RO | volatile | Telemetry, contents change between reads |
-| 0x15 | 8B | RW | zeros | Preset data? |
-| 0x16 | 4B | RW | 768,768 | Two u16 LE. **Not ISO** — writing 100/800/3200 in manual mode changed nothing |
-| 0x17 | 129B | RW | hash | Unknown |
-| 0x18 | 4B | RW | varies | Unknown |
-| **0x19** | 2B | RW | auto | **Exposure time (µs)** ✅ |
-| 0x1a | 8B | RW | pan/tilt | **Gimbal position**, 2 int32 LE arc-seconds ✅ |
-| **0x1b** | 2B | RW | 0x10 | **Function status bitmask** (0x10 = gestures) ✅ |
-| 0x1c | 10B | RW | varies | Unknown |
-| 0x1d | 2B | RO | ~33 | Status (not settable) |
-| **0x1e** | 1B | RW | 2 | **Exposure mode (0-5)** ✅ |
+The names below are **not guesses**. The Windows app embeds its own protobuf
+`ControlSelector` enum, and the descriptor carries the numbers. See "How the names were
+recovered" below to redo it. ✅ = verified on this camera, gen 1, firmware v1.4.5.8_build1.
 
----
+| Sel | Official name | Len | RW | Meaning / value seen |
+|---|---|---|---|---|
+| 0x01 | XU_EXEC_SCRIPT_CONTROL | 4 | rw | zeros |
+| 0x02 | XU_VIDEO_MODE_CONTROL | 52 | rw | AI Tracking / Whiteboard / Overhead / DeskView. Tail holds ints -33, -809, 0, 100 — looks like pan, tilt, ?, zoom×100 |
+| 0x03 | XU_DEVICE_INFO_CONTROL | 170 | rw | ✅ serial, a UUID, and **firmware `v1.4.5.8_build1`** as strings |
+| 0x04 | XU_PTZ_CMD_CONTROL | 262 | rw | zeros |
+| 0x05 | XU_GESTURE_STATUS_CONTROL | 1 | rw | ✅ gesture bitmask: palm 0x02, L 0x04, V 0x08 |
+| 0x06 | XU_GESTURE_BIND_CONTROL | 5 | rw | zeros — which action each gesture triggers |
+| 0x07 | XU_NOISE_CANCEL_CONTROL | 1 | rw | ✅ **microphone noise cancelling**, default 1. This is why toggling it never changed the image — it was never HDR |
+| 0x08 | XU_FIRMWARE_UPGRADE / XU_BLEND_DRAW | 502 | rw | volatile, aliased pair in the enum |
+| 0x09 | XU_EXPOSURE_VALUE_CONTROL | 2 | rw | ✅ **exposure compensation**, signed, 0.01 EV per unit, ±300 = ±3.00 EV |
+| 0x0a | XU_TAKE_PICTURE_CONTROL | 129 | rw | zeros |
+| 0x0b | XU_DEVICE_STATUS_CONTROL | 5 | ro | ✅ **byte 0 and 1 are temperatures in °C**, byte 3 is a **streaming flag**. Idle 44/37 flag 0, after a minute of 720p30 46/41 flag 1 |
+| 0x0c | XU_DEVICE_SN_CONTROL | 32 | rw | ✅ serial number string |
+| 0x0d | XU_DEVICE_LICENSEN_CONTROL | 129 | rw | per-device blob, don't paste |
+| 0x0e | XU_DEVICE_PARAM_CONTROL | 1 | **wo** | write-only, GET_INFO says no read |
+| 0x0f | XU_DOWNLOAD_FILE / XU_AF_MODE | 12 | rw | aliased pair. Volatile |
+| 0x10 | XU_UPLOAD_FILE / XU_EXPOSURE_CURVE | 255 | rw* | ✅ **exposure curve LUT**: 127 × u16 LE at offset 1, identity ramp 0,0,4…500. Writes revert |
+| 0x11 | XU_USB_MODE_SWITCH_CONTROL | 1 | rw | 0. **Do not write** — it can change how the device enumerates |
+| 0x12 | XU_TRACK_SPEED_CONTROL | 1 | rw | ✅ tracking speed, 1/2/3 = Quick/Ordinary/Slow in vendor wording |
+| 0x13 | XU_LAYOUT_STYLE_CONTROL | 1 | rw | ✅ composition Head / Half Body / Whole Body. **1, 2, 3 accepted, 0 rejected** |
+| 0x14 | XU_HEAD_LIST_CONTROL | 240 | ro | ✅ **detected head boxes as floats**. All-zero with nobody in frame, populated otherwise |
+| 0x15 | XU_TRACK_TARGET_CONTROL | 8 | rw | zeros |
+| 0x16 | XU_PANTILT_RELATIVE_CONTROL | 4 | rw | 768, 768 |
+| 0x17 | XU_MOBVOI_PUBKEY_CONTROL | 129 | rw | per-device blob, don't paste |
+| 0x18 | XU_BIAS_CONTROL | 4 | rw | 48, 2643. Distinct from 0x09 — the ParamType enum groups PARAM_BIAS with the PTZ family, so this is likely the horizontal fine-tuning |
+| 0x19 | XU_ISO_CONTROL | 2 | rw | ✅ **ISO**. 100 → luminance 3.8, 400 → 10.2, 1600 → 26.4, 3200 → 40.5 |
+| 0x1a | XU_PANTILT_ABSOLUTE_CONTROL | 8 | rw | ✅ 2 × int32 LE in arc-seconds, matches the V4L2 pan/tilt |
+| 0x1b | XU_FUNC_ENABLE_CONTROL | 2 | rw | ✅ function bitmask, 0x10 = gestures enabled |
+| 0x1c | XU_VIDEO_RES_CONTROL | 10 | rw | mirrors the active stream format, zeros while idle |
+| 0x1d | XU_EXPOSURE_TIME_ABSOLUTE_CONTROL | 2 | rw | ✅ **shutter as denominator**, 60 = 1/60s. 1/30 → 85.0, 1/120 → 38.4, 1/1000 → 14.9, 1/8000 → 8.2. Firmware quantises: 30 reads back 29 |
+| 0x1e | XU_AE_MODE_CONTROL | 1 | rw | ✅ exposure mode, 1 = manual, 2 = auto |
+
+Unit 9 exposes 30 selectors, one per enum entry that this firmware implements.
+
+### The two corrections this table forced
+
+1. **0x19 is ISO, not exposure time.** The old shutter control wrote microseconds into
+   the ISO register — 33333 clamped to maximum ISO and 250 was ISO 250, so the image
+   dimmed and brightened for entirely the wrong reason. Shutter belongs at 0x1d.
+2. **0x07 is microphone noise cancelling**, not an HDR candidate. No amount of luminance
+   testing would ever have shown an effect.
+
+## 🔍 HOW THE NAMES WERE RECOVERED
+
+`Insta360 Link Controller.exe` (115 MB, Qt + protobuf) embeds the serialized descriptor
+for its own `ControlSelector` enum. No debugger or disassembler needed:
+
+1. Find the name pool: `grep -a` the exe for `XU_` — the strings sit around file offset
+   `0x1668c40`, right after the literal `ControlSelector`.
+2. Each entry is a serialized `EnumValueDescriptorProto`: `0a <len> <NAME> 10 <number>`.
+   The `10` is protobuf field 2 as a varint, and that varint **is the selector number**.
+   Three numbers are aliased pairs (0x08, 0x0f, 0x10).
+3. The same blob holds the `ParamType` enum used by the app's WebSocket protocol —
+   PARAM_ISO_VALUE, PARAM_HDR, PARAM_PRIVACY_MODE, PARAM_GESTURE_*_SWITCH and so on.
+
+`ParamType` names features the XU list does not, so it is the better map of what the
+camera can do: PARAM_HDR, PARAM_AUTI_FLICK, PARAM_SMART_ADJUST, PARAM_PRIVACY_MODE,
+PARAM_ROLL_ADJUST, PARAM_LOWER_RES, PARAM_VERTICAL_SCREEN, PARAM_FINE_TUNING,
+PARAM_GESTURE_ROCK_SWITCH and PARAM_GESTURE_OK_SWITCH (two gestures the Linux side has
+never seen), PARAM_AUDIO_CAPTURE_MODE, PARAM_TRACK_FIRBOIDDEN_AREA, PARAM_HOST_PTZ_INFO.
+Those are app-level parameter ids, not selectors — they travel inside XU payloads.
 
 ## 📝 TODO
 
 1. [x] Write cameractrls extension class — now `Insta360Ctrls`, shared with the Link 2 family
-2. [ ] Verify writes with a stream running: 0x12 tracking speed → 0x09 bias → 0x05 gestures → 0x1b bits
-3. [ ] Test 0x07 effect visually (HDR?)
-4. [ ] Find HDR toggle
-5. [ ] Find the real ISO/gain selector (0x1b was a misread)
-6. [ ] Test presets (Unit 10 slots?)
-7. [ ] Feed the gen 1 findings back into cameractrls PR #101 / issue #55
+2. [x] Find the real ISO selector — 0x19, verified
+3. [x] Identify 0x07 — microphone noise cancelling, not HDR
+4. [ ] Find the HDR toggle. PARAM_HDR exists, so it is reachable, probably inside 0x02 or 0x1b
+5. [ ] Confirm 0x13 layout style visually — needs a face in frame
+6. [ ] Confirm gesture bits and tracking speed — needs a human in front of the lens
+7. [ ] Test presets (unit 10 slots)
+8. [ ] Feed the gen 1 findings back into cameractrls PR #101 / issue #55
 
 ---
 
