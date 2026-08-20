@@ -2228,11 +2228,6 @@ class Insta360Ctrls:
             self.ctrls = []
             return
 
-        bias_min, bias_max = self.read_signed_range(
-            INSTA360_EXPOSURE_BIAS_SELECTOR, INSTA360_EXPOSURE_BIAS_LENGTH,
-            INSTA360_EXPOSURE_BIAS_MIN, INSTA360_EXPOSURE_BIAS_MAX,
-        )
-
         self.ctrls = [
             Insta360Ctrl(
                 'insta360_track_speed',
@@ -2275,18 +2270,6 @@ class Insta360Ctrls:
                 gesture_bit=INSTA360_GESTURE_BIT_V,
             ),
             Insta360Ctrl(
-                'insta360_exposure_bias',
-                'Exposure Bias',
-                'integer',
-                'Signed exposure bias adjustment',
-                INSTA360_EXPOSURE_BIAS_SELECTOR,
-                INSTA360_EXPOSURE_BIAS_LENGTH,
-                min=bias_min,
-                max=bias_max,
-                step=1,
-                default=INSTA360_EXPOSURE_BIAS_DEFAULT,
-            ),
-            Insta360Ctrl(
                 'insta360_serial',
                 'Serial Number',
                 'info',
@@ -2297,7 +2280,29 @@ class Insta360Ctrls:
             ),
         ]
 
-        if self.usb_ids == INSTA360_LINK:
+        if self.usb_ids != INSTA360_LINK:
+            # The gen 1 Link echoes every value written here and its image never changes,
+            # measured across the whole -4..4 range with a stream running, so the control
+            # is offered to the Link 2 family only rather than as a slider that does nothing.
+            bias_min, bias_max = self.read_signed_range(
+                INSTA360_EXPOSURE_BIAS_SELECTOR, INSTA360_EXPOSURE_BIAS_LENGTH,
+                INSTA360_EXPOSURE_BIAS_MIN, INSTA360_EXPOSURE_BIAS_MAX,
+            )
+            self.ctrls += [
+                Insta360Ctrl(
+                    'insta360_exposure_bias',
+                    'Exposure Bias',
+                    'integer',
+                    'Signed exposure bias adjustment',
+                    INSTA360_EXPOSURE_BIAS_SELECTOR,
+                    INSTA360_EXPOSURE_BIAS_LENGTH,
+                    min=bias_min,
+                    max=bias_max,
+                    step=1,
+                    default=INSTA360_EXPOSURE_BIAS_DEFAULT,
+                ),
+            ]
+        else:
             self.ctrls += [
                 Insta360Ctrl(
                     'insta360_exposure_mode',
