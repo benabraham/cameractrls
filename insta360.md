@@ -105,11 +105,10 @@ in the background. The exposure results below were taken with a preview open, so
 
 ### 0x09 - Exposure Bias (2 bytes) — identified
 - **Corrected 2026-08-20**: `XU_EXPOSURE_VALUE_CONTROL`, per PR #101.
-- The "strange" 252-4 range is a **signed byte in the low half**: `0xFC` = -4, `0x04` = +4.
-  So gen 1 offers **-4..+4**, where the Link 2 family reports -100..+100 over both bytes.
-  `Insta360Ctrls.read_signed_range()` handles both.
+- **The reported -4..+4 range is wrong.** The real unit is **0.01 EV** and the usable
+  range is **±300 = ±3.00 EV**, confirmed by luminance sweep — see the test log below.
 - Matches the "Exposure Compensation ±3 EV" row in the Windows feature table below.
-- **Status**: ✅ Range confirmed by GET_MIN/GET_MAX, write effect not yet verified
+- **Status**: ✅ Confirmed working on gen 1
 
 ### 0x15 - Unknown (8 bytes)
 - Value: all zeros
@@ -190,12 +189,19 @@ The revert-at-idle behaviour described in issue #55 **did not occur once** while
 
 ### Negative results
 
-**0x09 exposure bias — accepted, echoed, no image effect.** Swept -4, -2, 0, +2, +4 in
-auto exposure mode, both byte layouts (`fc ff` sign-extended and `fc 00` low-byte-signed).
-Every write echoed exactly on GET_CUR and luminance stayed at 104.6-106.0 with identical
-stddev. The Windows app clearly has a working ±3.0EV slider in auto mode (screenshot
-`…200627.png` at 3.0EV is visibly blown out), so either gen 1 firmware stores this value
-and ignores it, or the EV control lives elsewhere and 0x09 is something else on gen 1.
+### 0x09 exposure bias — WORKS, the first test just used the wrong scale
+
+An initial sweep of -4..+4 moved nothing, because **the unit is 0.01 EV**: ±4 raw is
+±0.04 EV, far inside the noise. GET_MIN/GET_MAX report -4/+4, which is neither the range
+nor the unit — ignore them on this firmware. Swept properly against frame luminance:
+
+| 0x09 | -300 | -200 | -100 | -50 | 0 | +50 | +100 | +200 | +300 |
+|---|---|---|---|---|---|---|---|---|---|
+| luminance | 50.4 | 43.4 | 77.4 | 91.0 | 98.7 | 105.0 | 105.3 | 105.2 | 105.0 |
+
+Monotonic downwards, and flat above +50 only because the test scene was dim and the
+sensor had no headroom left — a scene limit, not a protocol one. **±300 = ±3.00 EV**,
+matching the Windows slider exactly. The app moves in 0.3 EV steps, i.e. 30 raw units.
 
 **0x07 — not HDR, or not measurably so.** Wrote 0 and 1, six seconds each: mean 100.1 /
 100.1, stddev 55.6 / 55.4, p5 19 / 19, p95 224 / 224. Identical. A fair caveat: HDR may
@@ -232,6 +238,33 @@ virtual-camera pipeline, not pushed into the firmware.
 Tracking speed semantics (Quick/Ordinary/Slow is a rate, invisible in a frame) and the
 gesture bits (someone has to perform a palm / L / V in front of the lens).
 
+## 📜 THE WINDOWS APP LOG IS A PROTOCOL ORACLE
+
+`/mnt/winos/Users/DanielSrb/AppData/Local/Insta360/Insta360 Link Controller/log/2025_12_10/19_25_39.log`
+is the session in which the screenshots were taken, and it names what the app reads and
+writes over the extension unit. Grep it with `grep -a` — it contains NUL bytes, so plain
+grep silently treats it as binary and finds nothing.
+
+What it establishes:
+
+- `camera_image_param.cc: get Exposure Compensation from uvc_extend: 0` — **exposure
+  compensation is a camera XU value on gen 1**, not a host-side effect.
+- `set compensation: -0.3 / -0.6 / -0.9 / -1.2 / -1.5` — the app works in **EV floats,
+  0.3 EV per slider step**, which pins the raw unit at 0.01 EV given the ±300 range.
+- `get iso from uvc_extend: 770 / 814 / 818 / 938 / 100` and `set iso to 800 / 1000 /
+  3200` — **an ISO selector exists on gen 1 and is still unfound.** The odd read values
+  look like the AE's actual ISO, the set values are the slider positions.
+- `set shutter to 30 / 50 / 80 / 240 / 1250 / 8000` — the app's shutter unit is the
+  **denominator** (1/30s … 1/8000s), while selector 0x19 takes **microseconds**.
+- `spline_manager.cc: reset exposure curve clicked!`, `begin add point, x: 203.582,
+  y: 23.138`, `axis w: 238, h: 160` — the curve is edited in **widget pixel coordinates**
+  and stored host-side, consistent with 0x10 rejecting writes.
+- `set auto exposure: 0/1`, `set white balance to`, `set brightness/contrast/saturation`,
+  `set sharpening_level`, `set AF`, `set Manual Focus` — the rest of the Effects tab.
+
+Anything still unmapped should be looked for here first: turn the knob in the app on
+Windows, then read the log line it produced.
+
 ## 🪟 OFFICIAL WINDOWS UI — COMPLETE OPTION INVENTORY
 
 Source: 8 screenshots of **Insta360 Link Controller** taken 2025-12-10, this camera
@@ -262,8 +295,8 @@ medium / slow. Which integer maps to which is still unproven on gen 1.
 | Option | Values seen | Linux status |
 |---|---|---|
 | Exposure | Auto / M switch | ✅ selector 0x1e |
-| — Auto: EV bias | **0.0EV .. 3.0EV** (±3 EV) | ⚠️ selector 0x09 reports -4..+4, writes stick but showed no luminance change |
-| — Manual: ISO | **100 .. 3200** | ❌ selector unknown (0x1b was a misread) |
+| — Auto: EV bias | **0.0EV .. 3.0EV** (±3 EV) | ✅ selector 0x09, 0.01 EV units, ±300 |
+| — Manual: ISO | **100 .. 3200** | ❌ selector unknown — but the app log proves one exists (0x1b and 0x16 both ruled out) |
 | — Manual: Shutter | **1/8000s .. 1/30s** | ✅ selector 0x19 (µs) |
 | — Manual: Exposure curve | editable curve + reset | 🔍 **selector 0x10 (255 byte table) is the prime suspect** |
 | Auto Focus | Auto / M + 0-100% | ✅ V4L2 `focus_automatic_continuous` / `focus_absolute` |
@@ -418,7 +451,7 @@ UVCIOC_CTRL_QUERY = 0xc0107521
 | 0x05 | 1B | RW | 0x0e | **Gesture bitmask** (palm 0x02, L 0x04, V 0x08) ✅ |
 | 0x06 | 5B | RW | zeros | Unknown |
 | 0x07 | 1B | RW | 1 | Toggle, settable, **no measurable image effect** (not HDR?) |
-| 0x09 | 2B | RW | 0 | **Exposure bias**, -4..+4 signed ✅ |
+| 0x09 | 2B | RW | 0 | **Exposure bias**, signed, **0.01 EV units, ±300 = ±3.00 EV** ✅ |
 | 0x0a | 129B | RW | zeros | Unknown |
 | 0x0b | 5B | RO | varies | Status |
 | 0x0c | 32B | RO | model | **Serial / model ID** string ✅ |
@@ -431,7 +464,7 @@ UVCIOC_CTRL_QUERY = 0xc0107521
 | 0x13 | 1B | RO | 1 | Status (not settable) |
 | 0x14 | 240B | RO | volatile | Telemetry, contents change between reads |
 | 0x15 | 8B | RW | zeros | Preset data? |
-| 0x16 | 4B | RW | varies | Unknown |
+| 0x16 | 4B | RW | 768,768 | Two u16 LE. **Not ISO** — writing 100/800/3200 in manual mode changed nothing |
 | 0x17 | 129B | RW | hash | Unknown |
 | 0x18 | 4B | RW | varies | Unknown |
 | **0x19** | 2B | RW | auto | **Exposure time (µs)** ✅ |

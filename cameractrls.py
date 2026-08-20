@@ -2123,10 +2123,18 @@ INSTA360_GESTURE_BIT_V = 0x08
 INSTA360_EXPOSURE_BIAS_SELECTOR = 0x09
 INSTA360_EXPOSURE_BIAS_LENGTH = 2
 
-# only used when the device reports no usable range, see read_signed_range()
-INSTA360_EXPOSURE_BIAS_MIN = -100
-INSTA360_EXPOSURE_BIAS_MAX = 100
 INSTA360_EXPOSURE_BIAS_DEFAULT = 0
+
+# The gen 1 Link counts in 0.01 EV and covers the same +/-3.00 EV as the Windows app,
+# measured by sweeping the selector against frame luminance. Its GET_MIN/GET_MAX report
+# -4/4, which is neither the range nor the unit, so the range is carried here per device.
+INSTA360_EXPOSURE_BIAS_RANGE = {
+    INSTA360_LINK: (-300, 300),
+}
+INSTA360_EXPOSURE_BIAS_RANGE_DEFAULT = (-100, 100)
+
+def insta360_exposure_bias_format(scale, value):
+    return f'{int(value) / 100:+.2f} EV'
 
 ## Device serial number (XU_DEVICE_SN_CONTROL, selector 0x0C, 32 bytes, read-only)
 INSTA360_DEVICE_SN_SELECTOR = 0x0C
@@ -2176,11 +2184,11 @@ def insta360_shutter_format(scale, value):
 
 class Insta360Ctrl(BaseCtrl):
     def __init__(self, text_id, name, type, tooltip, selector, length, menu=None,
-                 min=None, max=None, step=None, default=None, readonly=False, gesture_bit=None,
-                 format_value=None, scale_class=None):
+                 min=None, max=None, step=None, step_big=None, default=None, readonly=False,
+                 gesture_bit=None, format_value=None, scale_class=None):
         super().__init__(text_id, name, type, tooltip=tooltip, menu=menu or [],
-                         min=min, max=max, step=step, default=default, readonly=readonly,
-                         format_value=format_value, scale_class=scale_class)
+                         min=min, max=max, step=step, step_big=step_big, default=default,
+                         readonly=readonly, format_value=format_value, scale_class=scale_class)
         self.selector = selector
         self.length = length
         self.gesture_bit = gesture_bit
@@ -2207,21 +2215,6 @@ class Insta360Ctrls:
 
     def write(self, selector, data):
         query_xu_control(self.fd, self.unit_id, selector, UVC_SET_CUR, to_buf(data))
-
-    # The Link 2 family reports a signed range over the full control length, the gen 1 Link
-    # keeps it in the low byte, so its -4..4 decodes to 252..4 over two bytes. Reinterpret
-    # when the minimum lands above the maximum, fall back when the device reports nothing.
-    def read_signed_range(self, selector, length, min_fallback, max_fallback):
-        min_raw = self.query(selector, length, UVC_GET_MIN)
-        max_raw = self.query(selector, length, UVC_GET_MAX)
-        vmin = int.from_bytes(min_raw, 'little', signed=True)
-        vmax = int.from_bytes(max_raw, 'little', signed=True)
-        if vmin > vmax:
-            vmin = int.from_bytes(min_raw[:1], 'little', signed=True)
-            vmax = int.from_bytes(max_raw[:1], 'little', signed=True)
-        if vmin >= vmax:
-            return min_fallback, max_fallback
-        return vmin, vmax
 
     def get_device_controls(self):
         if not self.supported():
@@ -2280,29 +2273,28 @@ class Insta360Ctrls:
             ),
         ]
 
-        if self.usb_ids != INSTA360_LINK:
-            # The gen 1 Link echoes every value written here and its image never changes,
-            # measured across the whole -4..4 range with a stream running, so the control
-            # is offered to the Link 2 family only rather than as a slider that does nothing.
-            bias_min, bias_max = self.read_signed_range(
-                INSTA360_EXPOSURE_BIAS_SELECTOR, INSTA360_EXPOSURE_BIAS_LENGTH,
-                INSTA360_EXPOSURE_BIAS_MIN, INSTA360_EXPOSURE_BIAS_MAX,
-            )
-            self.ctrls += [
-                Insta360Ctrl(
-                    'insta360_exposure_bias',
-                    'Exposure Bias',
-                    'integer',
-                    'Signed exposure bias adjustment',
-                    INSTA360_EXPOSURE_BIAS_SELECTOR,
-                    INSTA360_EXPOSURE_BIAS_LENGTH,
-                    min=bias_min,
-                    max=bias_max,
-                    step=1,
-                    default=INSTA360_EXPOSURE_BIAS_DEFAULT,
-                ),
-            ]
-        else:
+        is_link1 = self.usb_ids == INSTA360_LINK
+        bias_min, bias_max = INSTA360_EXPOSURE_BIAS_RANGE.get(
+            self.usb_ids, INSTA360_EXPOSURE_BIAS_RANGE_DEFAULT)
+
+        self.ctrls += [
+            Insta360Ctrl(
+                'insta360_exposure_bias',
+                'Exposure Bias',
+                'integer',
+                'Exposure bias, applied on top of the auto exposure metering',
+                INSTA360_EXPOSURE_BIAS_SELECTOR,
+                INSTA360_EXPOSURE_BIAS_LENGTH,
+                min=bias_min,
+                max=bias_max,
+                step=1,
+                step_big=30 if is_link1 else 10,
+                default=INSTA360_EXPOSURE_BIAS_DEFAULT,
+                format_value=insta360_exposure_bias_format if is_link1 else None,
+            ),
+        ]
+
+        if is_link1:
             self.ctrls += [
                 Insta360Ctrl(
                     'insta360_exposure_mode',
