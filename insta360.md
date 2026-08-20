@@ -6,6 +6,16 @@
 - **Firmware**: v1.4.5.8_build1
 - **Serial**: 13B586099180472
 
+## ⚠️ XU writes only stick while the camera is streaming
+
+Reported in [cameractrls issue #55](https://github.com/soyersoyer/cameractrls/issues/55)
+for this exact camera: written at idle, an XU control is accepted, `GET_CUR` echoes the
+new value, and about a second later the firmware silently reverts it. No error at any point.
+
+**Every "read-only" / "doesn't accept changes" verdict in this file that was taken without
+a capture running is suspect** and needs re-testing with e.g. `ffmpeg -f v4l2 -i <dev>`
+in the background. The exposure results below were taken with a preview open, so those hold.
+
 ## Extension Units Found
 
 | Unit | GUID | Controls |
@@ -43,16 +53,15 @@
   - 100 µs = 1/10000s (darkest)
 - **Status**: ✅ Fully working
 
-### 0x1b - Gain/ISO (2 bytes, little-endian)
-- **Observed values**: 0, 25, 48, 100, 112, 116, 216
-- **Working range**: 0-100 (tested)
-- **Setting 50 → readback 48** (rounds to nearest valid?)
-- **Setting 0 → readback 0** ✅
-- **Setting 25 → readback 25** ✅
-- **Setting 100 → readback 100** ✅
-- **Setting 200+ → TIMEOUT/CRASH** ❌
-- **Windows docs say**: ISO 100-3200 (but real range seems different)
-- **Status**: ⚠️ Works 0-~100, crashes above
+### 0x1b - Function Status Bitmask (2 bytes, little-endian) — **NOT gain**
+- **Corrected 2026-08-20**: this is `XU_FUNC_STATUS_CONTROL`, a feature bitmask, not gain/ISO.
+- Confirmed by cameractrls [PR #101](https://github.com/soyersoyer/cameractrls/pull/101)
+  (Link 2 family) and by reading it here: current value **16 = 0x10**, the
+  "gestures enabled" bit, consistent with 0x05 reading 0x0E (all three gestures on).
+- **This explains the crashes**: writing 200 didn't set an out-of-range gain, it set
+  a pile of unrelated feature bits at once, and the firmware fell over.
+- **Do not write raw values to 0x1b.** Flip single bits only.
+- **Status**: ✅ Identified, handled by `Insta360Ctrls` (gesture-all bit only)
 
 ### 0x07 - Unknown Toggle (1 byte)
 - **Values**: 0 or 1
@@ -71,29 +80,36 @@
 - **Tested**: Setting different values, readback always same
 - **Status**: ❌ Read-only (doesn't accept changes)
 
-### 0x05 - Unknown Toggle (1 byte)
-- Default: 0
-- **Tested**: Setting to 1, readback stays 0
-- **Status**: ❌ Read-only
+### 0x05 - Gesture Bitmask (1 byte) — identified
+- **Corrected 2026-08-20**: `XU_GESTURE_STATUS_CONTROL`, per PR #101:
+  `0x02` = palm (tracking on/off), `0x04` = L (zoom), `0x08` = V (whiteboard).
+- Reads **14 = 0b1110** here, i.e. all three gestures enabled.
+- The earlier "readback stays 0" verdict was almost certainly taken **at idle** —
+  see the streaming caveat below.
+- **Status**: ✅ Identified, exposed as three booleans
 
 ### 0x11 - Possibly Gesture Control (1 byte)
 - Default: 0
 - Setting to 1 caused protocol error
 - **Status**: ❌ Not settable
 
-### 0x12 - Unknown Toggle (1 byte)
-- Default: 0
-- **Status**: Not tested
+### 0x12 - Tracking Speed (1 byte) — identified
+- **Corrected 2026-08-20**: `XU_TRACK_SPEED_CONTROL`, per PR #101: 1 = slow, 2 = medium, 3 = fast.
+- Reads **1** here (slow), not 0 as noted earlier.
+- **Status**: ✅ Identified, write effect not yet verified
 
 ### 0x13 - Unknown Toggle (1 byte)
 - Default: 1
 - **Tested**: Setting to 0, readback stays 1
 - **Status**: ❌ Read-only
 
-### 0x09 - Unknown (2 bytes)
-- Value: 60
-- Range reported: 252-4 (strange)
-- **Status**: Not tested
+### 0x09 - Exposure Bias (2 bytes) — identified
+- **Corrected 2026-08-20**: `XU_EXPOSURE_VALUE_CONTROL`, per PR #101.
+- The "strange" 252-4 range is a **signed byte in the low half**: `0xFC` = -4, `0x04` = +4.
+  So gen 1 offers **-4..+4**, where the Link 2 family reports -100..+100 over both bytes.
+  `Insta360Ctrls.read_signed_range()` handles both.
+- Matches the "Exposure Compensation ±3 EV" row in the Windows feature table below.
+- **Status**: ✅ Range confirmed by GET_MIN/GET_MAX, write effect not yet verified
 
 ### 0x15 - Unknown (8 bytes)
 - Value: all zeros
@@ -164,12 +180,12 @@ From Windows Link Controller software:
 |---------|-------------|--------|
 | Auto/Manual Exposure | 0x1e | ✅ Found |
 | Shutter Speed (1/30-1/8000) | 0x19 | ✅ Found |
-| ISO (100-3200) | 0x1b | ⚠️ Partial |
-| Exposure Compensation (±3 EV) | 0x1d? | 🔍 Unknown |
+| ISO (100-3200) | ? | 🔍 Unknown (0x1b was a wrong guess, see above) |
+| Exposure Compensation (±3 EV) | 0x09 | ✅ Found (-4..+4) |
 | HDR | ? | 🔍 Unknown |
-| Tracking Mode | ? | 🔍 Unknown |
-| DeskView/Overhead/Whiteboard | ? | 🔍 Unknown |
-| Gesture Control | 0x11? | 🔍 Unknown |
+| Tracking Mode / Speed | 0x12 | ✅ Found (slow/medium/fast) |
+| DeskView/Overhead/Whiteboard | ? | 🔍 Unknown (V gesture toggles whiteboard) |
+| Gesture Control | 0x05 + 0x1b | ✅ Found (per-gesture bits + global enable) |
 | Presets (save/recall) | 0x15? | 🔍 Unknown |
 | Privacy Mode | ? | 🔍 Unknown |
 
@@ -272,19 +288,19 @@ UVCIOC_CTRL_QUERY = 0xc0107521
 | 0x01 | 4B | RW | 0 | Unknown |
 | 0x02 | 52B | RW | complex | Unknown |
 | 0x03 | 170B | RO | info | Device info (serial, firmware) |
-| 0x05 | 1B | RO | 0 | Status? |
+| 0x05 | 1B | RW | 0x0e | **Gesture bitmask** (palm 0x02, L 0x04, V 0x08) ✅ |
 | 0x06 | 5B | RW | zeros | Unknown |
 | 0x07 | 1B | RW | 1 | **Toggle - settable, effect unknown** |
-| 0x09 | 2B | RW | 60 | Unknown |
+| 0x09 | 2B | RW | 0 | **Exposure bias**, -4..+4 signed ✅ |
 | 0x0a | 129B | RW | zeros | Unknown |
 | 0x0b | 5B | RO | varies | Status |
-| 0x0c | 32B | RO | model | Model ID string |
+| 0x0c | 32B | RO | model | **Serial / model ID** string ✅ |
 | 0x0d | 129B | RW | hash | Unknown |
 | 0x0e | 1B | RW | - | Unknown |
 | 0x0f | 12B | RW | varies | Unknown |
 | 0x10 | 255B | RW | table | Unknown lookup table |
 | 0x11 | 1B | RO | 0 | Status (not settable) |
-| 0x12 | 1B | RW | 0 | Not tested |
+| 0x12 | 1B | RW | 1 | **Tracking speed** 1=slow 2=medium 3=fast ✅ |
 | 0x13 | 1B | RO | 1 | Status (not settable) |
 | 0x14 | 240B | RO | zeros | Unknown |
 | 0x15 | 8B | RW | zeros | Preset data? |
@@ -293,7 +309,7 @@ UVCIOC_CTRL_QUERY = 0xc0107521
 | 0x18 | 4B | RW | varies | Unknown |
 | **0x19** | 2B | RW | auto | **Exposure time (µs)** ✅ |
 | 0x1a | 8B | RW | pan/tilt? | Two 32-bit signed values |
-| **0x1b** | 2B | RW | varies | **Gain (0-100 safe)** ⚠️ |
+| **0x1b** | 2B | RW | 0x10 | **Function status bitmask** (0x10 = gestures) ✅ |
 | 0x1c | 10B | RW | varies | Unknown |
 | 0x1d | 2B | RO | ~33 | Status (not settable) |
 | **0x1e** | 1B | RW | 2 | **Exposure mode (0-5)** ✅ |
@@ -302,12 +318,13 @@ UVCIOC_CTRL_QUERY = 0xc0107521
 
 ## 📝 TODO
 
-1. [ ] Write cameractrls extension class (Insta360LinkCtrls)
-2. [ ] Test 0x07 effect visually (HDR?)
-3. [ ] Find tracking mode controls
+1. [x] Write cameractrls extension class — now `Insta360Ctrls`, shared with the Link 2 family
+2. [ ] Verify writes with a stream running: 0x12 tracking speed → 0x09 bias → 0x05 gestures → 0x1b bits
+3. [ ] Test 0x07 effect visually (HDR?)
 4. [ ] Find HDR toggle
-5. [ ] Test presets (Unit 10 slots?)
-6. [ ] Submit PR to cameractrls repo
+5. [ ] Find the real ISO/gain selector (0x1b was a misread)
+6. [ ] Test presets (Unit 10 slots?)
+7. [ ] Feed the gen 1 findings back into cameractrls PR #101 / issue #55
 
 ---
 

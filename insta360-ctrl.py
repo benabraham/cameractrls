@@ -8,7 +8,9 @@ Based on reverse engineering documented in docs/insta360.md
 Confirmed working controls:
 - Exposure Mode (0x1e): auto/manual mode selection
 - Shutter Speed (0x19): 1/30s to 1/10000s (manual mode only)
-- Gain (0x1b): 0-100 (values >100 may crash camera!)
+
+Note: 0x1b is NOT gain, it is the function status bitmask (see insta360.md).
+Writing raw values there is what disconnected the camera, so it is gone from here.
 
 Usage:
   ./insta360-ctrl.py                    # Show current values
@@ -16,7 +18,6 @@ Usage:
   ./insta360-ctrl.py mode auto          # Set auto exposure mode
   ./insta360-ctrl.py shutter 1/60       # Set shutter to 1/60s
   ./insta360-ctrl.py shutter 8000       # Set shutter to 8000µs
-  ./insta360-ctrl.py gain 50            # Set gain to 50
 
 Author: srb
 License: MIT
@@ -37,7 +38,10 @@ INSTA360_LINK_USB_ID = '2e1a:4c01'
 # Selectors (control registers)
 SEL_EXP_MODE = 0x1e   # 1 byte: exposure mode
 SEL_EXP_TIME = 0x19   # 2 bytes LE: exposure time in microseconds
-SEL_GAIN = 0x1b       # 2 bytes LE: gain (0-100 safe range)
+SEL_FUNC_STATUS = 0x1b  # 2 bytes LE: function status bitmask, 0x10 = gestures enabled
+SEL_GESTURE = 0x05    # 1 byte: gesture bitmask, palm 0x02, L 0x04, V 0x08
+SEL_EXP_BIAS = 0x09   # 2 bytes LE: exposure bias, signed, -4..+4 on this firmware
+SEL_TRACK_SPEED = 0x12  # 1 byte: 1 slow, 2 medium, 3 fast
 
 # UVC Query commands
 UVC_SET_CUR = 0x01
@@ -178,6 +182,18 @@ EXP_MODES = {
 }
 EXP_MODES_REV = {v: k for k, v in EXP_MODES.items()}
 
+TRACK_SPEEDS = {
+    1: 'slow',
+    2: 'medium',
+    3: 'fast',
+}
+
+GESTURE_BITS = {
+    0x02: 'palm',
+    0x04: 'L',
+    0x08: 'V',
+}
+
 # Shutter speed presets (name -> microseconds)
 SHUTTER_PRESETS = {
     '1/30': 33333,
@@ -207,7 +223,10 @@ def show_status(fd, unit_id):
     """Display current camera settings"""
     mode = get_value(fd, unit_id, SEL_EXP_MODE, 1)
     shutter = get_value(fd, unit_id, SEL_EXP_TIME, 2)
-    gain = get_value(fd, unit_id, SEL_GAIN, 2)
+    bias = get_value(fd, unit_id, SEL_EXP_BIAS, 2)
+    track_speed = get_value(fd, unit_id, SEL_TRACK_SPEED, 1)
+    gestures = get_value(fd, unit_id, SEL_GESTURE, 1)
+    func_status = get_value(fd, unit_id, SEL_FUNC_STATUS, 2)
 
     print('📷 Insta360 Link Status')
     print('─' * 30)
@@ -219,12 +238,22 @@ def show_status(fd, unit_id):
     if shutter is not None:
         print(f'  Shutter Speed: {format_shutter(shutter)}')
 
-    if gain is not None:
-        print(f'  Gain:          {gain}')
+    if bias is not None:
+        print(f'  Exposure Bias: {bias - 256 if bias > 127 else bias}')
+
+    if track_speed is not None:
+        print(f'  Track Speed:   {TRACK_SPEEDS.get(track_speed, f"unknown({track_speed})")}')
+
+    if gestures is not None:
+        on = [name for bit, name in GESTURE_BITS.items() if gestures & bit]
+        print(f'  Gestures:      {", ".join(on) if on else "none"} (0x{gestures:02x})')
+
+    if func_status is not None:
+        print(f'  Func Status:   0x{func_status:04x}')
 
     print()
     if mode != 1:
-        print('ℹ️  Set mode to "manual" to control shutter/gain')
+        print('ℹ️  Set mode to "manual" to control the shutter speed')
 
 
 def main():
@@ -238,13 +267,12 @@ Examples:
   %(prog)s mode auto          Enable auto exposure
   %(prog)s shutter 1/60       Set shutter to 1/60s
   %(prog)s shutter 8000       Set shutter to 8000µs
-  %(prog)s gain 50            Set gain to 50 (0-100)
 
 Shutter presets: 1/30, 1/60, 1/125, 1/250, 1/500, 1/1000, 1/2000, 1/4000, 1/8000
 ''')
 
     parser.add_argument('control', nargs='?',
-                        choices=['mode', 'shutter', 'gain'],
+                        choices=['mode', 'shutter'],
                         help='Control to set')
     parser.add_argument('value', nargs='?',
                         help='Value to set')
@@ -318,25 +346,6 @@ Shutter presets: 1/30, 1/60, 1/125, 1/250, 1/500, 1/1000, 1/2000, 1/4000, 1/8000
                 print(f'✅ Shutter set to: {format_shutter(us)}')
             else:
                 print('❌ Failed to set shutter', file=sys.stderr)
-                sys.exit(1)
-
-        elif args.control == 'gain':
-            try:
-                val = int(args.value)
-            except ValueError:
-                print('❌ Gain must be integer', file=sys.stderr)
-                sys.exit(1)
-
-            if val < 0 or val > 100:
-                print(f'⚠️  Gain {val} outside safe range 0-100! Values >100 may crash camera!', file=sys.stderr)
-                if val > 100:
-                    print('❌ Refusing to set gain >100 to protect camera', file=sys.stderr)
-                    sys.exit(1)
-
-            if set_value(fd, unit_id, SEL_GAIN, val, 2):
-                print(f'✅ Gain set to: {val}')
-            else:
-                print('❌ Failed to set gain', file=sys.stderr)
                 sys.exit(1)
 
     finally:
