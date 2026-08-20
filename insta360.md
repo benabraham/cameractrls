@@ -172,6 +172,66 @@ in the background. The exposure results below were taken with a preview open, so
 
 ---
 
+## 🧪 TEST LOG 2026-08-20 — writes with a stream running
+
+Method: `ffmpeg` capturing 1280x720 MJPEG throughout, frames downscaled to 32x18 gray
+at 4 fps, mean/stddev/percentiles per phase. Every selector restored afterwards.
+
+### Confirmed working
+
+| Selector | Test | Result |
+|---|---|---|
+| 0x12 tracking speed | wrote 3, then 2 | **sticks** at +0.2s / +1s / +3s, no revert |
+| 0x1e exposure mode | wrote 1 (manual) | **sticks** |
+| 0x19 exposure time | 33333 µs (1/30s) | luminance 98.6 → **111.6** ✅ |
+| 0x19 exposure time | 250 µs (1/4000s) | luminance → **3.2** ✅ |
+
+The revert-at-idle behaviour described in issue #55 **did not occur once** while streaming.
+
+### Negative results
+
+**0x09 exposure bias — accepted, echoed, no image effect.** Swept -4, -2, 0, +2, +4 in
+auto exposure mode, both byte layouts (`fc ff` sign-extended and `fc 00` low-byte-signed).
+Every write echoed exactly on GET_CUR and luminance stayed at 104.6-106.0 with identical
+stddev. The Windows app clearly has a working ±3.0EV slider in auto mode (screenshot
+`…200627.png` at 3.0EV is visibly blown out), so either gen 1 firmware stores this value
+and ignores it, or the EV control lives elsewhere and 0x09 is something else on gen 1.
+
+**0x07 — not HDR, or not measurably so.** Wrote 0 and 1, six seconds each: mean 100.1 /
+100.1, stddev 55.6 / 55.4, p5 19 / 19, p95 224 / 224. Identical. A fair caveat: HDR may
+need a high-dynamic-range scene (bright window plus dark room) to show up at all, and the
+test scene was evenly lit.
+
+### 0x10 — the exposure curve LUT, read-only in practice
+
+Structure decoded: **1 header byte + 127 × u16 little-endian at offset 1**, values
+`0, 0, 4, 8, 12, … 496, 500` — a constant step of 4, i.e. a **linear identity ramp**,
+which is exactly the straight diagonal the "Exposure curve" widget shows in the screenshots.
+
+Writes do not take. A scaled curve (×0.4) and a gamma curve with endpoints preserved were
+both **silently reverted** — GET_CUR returns the identity ramp again within half a second,
+and luminance never moved. Only a byte-identical rewrite of the identity ramp "echoes".
+
+Note the Windows app keeps its curve **host-side** as normalised control points in
+`Documents/Insta360/Webcam-desktop/<serial>/<serial>_curve.json`
+(`curve_info: [{x:0,y:1},{x:1,y:0}]`), which fits: the curve is applied in the app's
+virtual-camera pipeline, not pushed into the firmware.
+
+### Other selectors decoded
+
+| Sel | Decoding | Value seen |
+|---|---|---|
+| 0x1a | 2 × int32 LE, arc-seconds | -291240, -11880 = **-80.9°, -3.3°** — gimbal pan/tilt position ✅ |
+| 0x14 | volatile | 17 nonzero bytes on one read, 240 zeros on the next — telemetry, not a setting |
+| 0x0f | 6 × u16 LE | 0, 1108, 724, 3276, 705, 3041 |
+| 0x18 | 2 × u16 LE | 48, 2643 |
+| 0x16 | 2 × u16 LE | 768, 768 |
+
+### Still needs a human
+
+Tracking speed semantics (Quick/Ordinary/Slow is a rate, invisible in a frame) and the
+gesture bits (someone has to perform a palm / L / V in front of the lens).
+
 ## 🪟 OFFICIAL WINDOWS UI — COMPLETE OPTION INVENTORY
 
 Source: 8 screenshots of **Insta360 Link Controller** taken 2025-12-10, this camera
@@ -357,7 +417,7 @@ UVCIOC_CTRL_QUERY = 0xc0107521
 | 0x03 | 170B | RO | info | Device info (serial, firmware) |
 | 0x05 | 1B | RW | 0x0e | **Gesture bitmask** (palm 0x02, L 0x04, V 0x08) ✅ |
 | 0x06 | 5B | RW | zeros | Unknown |
-| 0x07 | 1B | RW | 1 | **Toggle - settable, effect unknown** |
+| 0x07 | 1B | RW | 1 | Toggle, settable, **no measurable image effect** (not HDR?) |
 | 0x09 | 2B | RW | 0 | **Exposure bias**, -4..+4 signed ✅ |
 | 0x0a | 129B | RW | zeros | Unknown |
 | 0x0b | 5B | RO | varies | Status |
@@ -365,17 +425,17 @@ UVCIOC_CTRL_QUERY = 0xc0107521
 | 0x0d | 129B | RW | hash | Unknown |
 | 0x0e | 1B | RW | - | Unknown |
 | 0x0f | 12B | RW | varies | Unknown |
-| 0x10 | 255B | RW | table | Unknown lookup table |
+| 0x10 | 255B | RO* | ramp | **Exposure curve LUT**, 127 u16 LE identity ramp, writes revert |
 | 0x11 | 1B | RO | 0 | Status (not settable) |
 | 0x12 | 1B | RW | 1 | **Tracking speed** 1=slow 2=medium 3=fast ✅ |
 | 0x13 | 1B | RO | 1 | Status (not settable) |
-| 0x14 | 240B | RO | zeros | Unknown |
+| 0x14 | 240B | RO | volatile | Telemetry, contents change between reads |
 | 0x15 | 8B | RW | zeros | Preset data? |
 | 0x16 | 4B | RW | varies | Unknown |
 | 0x17 | 129B | RW | hash | Unknown |
 | 0x18 | 4B | RW | varies | Unknown |
 | **0x19** | 2B | RW | auto | **Exposure time (µs)** ✅ |
-| 0x1a | 8B | RW | pan/tilt? | Two 32-bit signed values |
+| 0x1a | 8B | RW | pan/tilt | **Gimbal position**, 2 int32 LE arc-seconds ✅ |
 | **0x1b** | 2B | RW | 0x10 | **Function status bitmask** (0x10 = gestures) ✅ |
 | 0x1c | 10B | RW | varies | Unknown |
 | 0x1d | 2B | RO | ~33 | Status (not settable) |
