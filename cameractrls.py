@@ -1261,149 +1261,6 @@ class KiyoProCtrls:
     def get_ctrls(self):
         return self.ctrls
 
-# Insta360 Link Extension Unit GUID faf1672d-b71b-4793-8c91-7b1c9b7f95f8 (little endian)
-INSTA360_LINK_GUID = b'\x2d\x67\xf1\xfa\x1b\xb7\x93\x47\x8c\x91\x7b\x1c\x9b\x7f\x95\xf8'
-INSTA360_LINK_USB_ID = '2e1a:4c01'
-
-# Insta360 Link selectors
-INSTA360_LINK_SEL_EXP_MODE = 0x1e  # 1 byte: exposure mode
-INSTA360_LINK_SEL_EXP_TIME = 0x19  # 2 bytes LE: exposure time in microseconds
-INSTA360_LINK_SEL_GAIN = 0x1b      # 2 bytes LE: gain (0-100 safe range)
-
-# Exposure mode values (1 byte)
-INSTA360_LINK_EXP_MANUAL = b'\x01'
-INSTA360_LINK_EXP_AUTO = b'\x02'
-INSTA360_LINK_EXP_AUTO_FAST = b'\x03'
-INSTA360_LINK_EXP_AUTO_SLOW = b'\x04'
-
-# Shutter speed presets: (label, microseconds)
-INSTA360_LINK_SHUTTER_PRESETS = [
-    ('1/30s', 33333),
-    ('1/60s', 16667),
-    ('1/125s', 8000),
-    ('1/250s', 4000),
-    ('1/500s', 2000),
-    ('1/1000s', 1000),
-    ('1/2000s', 500),
-    ('1/4000s', 250),
-]
-
-def insta360_link_shutter_format(scale, value):
-    idx = int(value)
-    if 0 <= idx < len(INSTA360_LINK_SHUTTER_PRESETS):
-        return INSTA360_LINK_SHUTTER_PRESETS[idx][0]
-    return f'{idx}'
-
-class Insta360LinkCtrls:
-    def __init__(self, device, fd):
-        self.device = device
-        self.fd = fd
-        self.unit_id = find_unit_id_in_sysfs(device, INSTA360_LINK_GUID)
-        self.usb_ids = find_usb_ids_in_sysfs(device)
-        self.get_device_controls()
-
-    def supported(self):
-        return self.unit_id != 0 and self.usb_ids == INSTA360_LINK_USB_ID
-
-    def get_device_controls(self):
-        if not self.supported():
-            self.ctrls = []
-            return
-
-        self.ctrls = [
-            BaseCtrl(
-                'insta360_link_exposure_mode',
-                'Exposure Mode',
-                'menu',
-                tooltip='Insta360 Link exposure mode. Set to manual to control shutter and gain.',
-                menu=[
-                    BaseCtrlMenu('auto', 'Auto', INSTA360_LINK_EXP_AUTO),
-                    BaseCtrlMenu('manual', 'Manual', INSTA360_LINK_EXP_MANUAL),
-                ],
-                default='auto',
-            ),
-            BaseCtrl(
-                'insta360_link_shutter',
-                'Shutter Speed',
-                'integer',
-                tooltip='Insta360 Link shutter speed. Only works in manual exposure mode.',
-                min=0,
-                max=len(INSTA360_LINK_SHUTTER_PRESETS) - 1,
-                step=1,
-                default=1,  # 1/60s
-                format_value=insta360_link_shutter_format,
-                scale_class='dark-to-light',
-            ),
-        ]
-
-        # Read current values from device
-        exp_mode_ctrl = find_by_text_id(self.ctrls, 'insta360_link_exposure_mode')
-        shutter_ctrl = find_by_text_id(self.ctrls, 'insta360_link_shutter')
-
-        # Read exposure mode
-        buf = to_buf(bytes(1))
-        query_xu_control(self.fd, self.unit_id, INSTA360_LINK_SEL_EXP_MODE, UVC_GET_CUR, buf)
-        for m in exp_mode_ctrl.menu:
-            if m.value == buf.raw[:1]:
-                exp_mode_ctrl.value = m.text_id
-                break
-        if exp_mode_ctrl.value is None:
-            exp_mode_ctrl.value = 'auto'
-
-        # Hide shutter if not in manual mode
-        shutter_ctrl.hidden = (exp_mode_ctrl.value != 'manual')
-
-        # Read shutter value and find closest preset index
-        buf = to_buf(bytes(2))
-        query_xu_control(self.fd, self.unit_id, INSTA360_LINK_SEL_EXP_TIME, UVC_GET_CUR, buf)
-        current_us = int.from_bytes(buf.raw[:2], 'little')
-        closest_idx = 1  # default to 1/60s
-        closest_diff = float('inf')
-        for idx, (label, us) in enumerate(INSTA360_LINK_SHUTTER_PRESETS):
-            diff = abs(us - current_us)
-            if diff < closest_diff:
-                closest_diff = diff
-                closest_idx = idx
-        shutter_ctrl.value = closest_idx
-
-    def setup_ctrls(self, params, errs):
-        if not self.supported():
-            return
-
-        for k, v in params.items():
-            ctrl = find_by_text_id(self.ctrls, k)
-            if ctrl is None:
-                continue
-
-            if ctrl.text_id == 'insta360_link_exposure_mode':
-                menu = find_by_text_id(ctrl.menu, v)
-                if menu is None:
-                    collect_warning(f'Insta360LinkCtrls: can\'t find {v} in {[m.text_id for m in ctrl.menu]}', errs)
-                    continue
-                query_xu_control(self.fd, self.unit_id, INSTA360_LINK_SEL_EXP_MODE, UVC_SET_CUR, to_buf(menu.value))
-                ctrl.value = menu.text_id
-                # Update shutter visibility
-                shutter_ctrl = find_by_text_id(self.ctrls, 'insta360_link_shutter')
-                if shutter_ctrl:
-                    shutter_ctrl.hidden = (menu.text_id != 'manual')
-
-            elif ctrl.text_id == 'insta360_link_shutter':
-                try:
-                    idx = int(v)
-                except ValueError:
-                    collect_warning(f'Insta360LinkCtrls: invalid shutter index {v}', errs)
-                    continue
-                if idx < 0 or idx >= len(INSTA360_LINK_SHUTTER_PRESETS):
-                    collect_warning(f'Insta360LinkCtrls: shutter index {idx} out of range', errs)
-                    continue
-                us = INSTA360_LINK_SHUTTER_PRESETS[idx][1]
-                buf = to_buf(us.to_bytes(2, 'little'))
-                query_xu_control(self.fd, self.unit_id, INSTA360_LINK_SEL_EXP_TIME, UVC_SET_CUR, buf)
-                ctrl.value = idx
-
-    def get_ctrls(self):
-        return self.ctrls
-
 # Logitech peripheral GUID ffe52d21-8030-4e2c-82d9-f587d00540bd
 LOGITECH_PERIPHERAL_GUID = b'\x21\x2d\xe5\xff\x30\x80\x2c\x4e\x82\xd9\xf5\x87\xd0\x05\x40\xbd'
 
@@ -2241,9 +2098,13 @@ class AnkerWorkCtrls:
     def get_ctrls(self):
         return self.ctrls
 
-# Insta360 Link 2 GUID: FAF1672D-B71B-4793-8C91-7B1C9B7F95F8 in little endian
-INSTA360_LINK2_GUID = b'\x2d\x67\xf1\xfa\x1b\xb7\x93\x47\x8c\x91\x7b\x1c\x9b\x7f\x95\xf8'
-INSTA360_LINK2_DEV_MATCH = [
+# Insta360 extension unit GUID FAF1672D-B71B-4793-8C91-7B1C9B7F95F8 in little endian.
+# Unit 9 of every Link generation carries it, the gen 1 Link (2e1a:4c01) included.
+INSTA360_GUID = b'\x2d\x67\xf1\xfa\x1b\xb7\x93\x47\x8c\x91\x7b\x1c\x9b\x7f\x95\xf8'
+
+INSTA360_LINK = '2e1a:4c01'
+INSTA360_DEV_MATCH = [
+    INSTA360_LINK,  # Link
     '2e1a:4c04',  # Link 2
     '2e1a:4c05',  # Link 2C
     '2e1a:4c06',  # Link 2 Pro
@@ -2251,159 +2112,268 @@ INSTA360_LINK2_DEV_MATCH = [
 ]
 
 ## Gesture status commands (XU_GESTURE_STATUS_CONTROL, selector 0x05, 1 byte bitmask)
-INSTA360_LINK2_GESTURE_SELECTOR = 0x05
-INSTA360_LINK2_GESTURE_LENGTH = 1
+INSTA360_GESTURE_SELECTOR = 0x05
+INSTA360_GESTURE_LENGTH = 1
 
-INSTA360_LINK2_GESTURE_BIT_PALM = 0x02
-INSTA360_LINK2_GESTURE_BIT_L = 0x04
-INSTA360_LINK2_GESTURE_BIT_V = 0x08
+INSTA360_GESTURE_BIT_PALM = 0x02
+INSTA360_GESTURE_BIT_L = 0x04
+INSTA360_GESTURE_BIT_V = 0x08
 
-## Exposure bias commands (XU_EXPOSURE_VALUE_CONTROL, selector 0x09, 2 bytes signed LE)
-INSTA360_LINK2_EXPOSURE_BIAS_SELECTOR = 0x09
-INSTA360_LINK2_EXPOSURE_BIAS_LENGTH = 2
+## Exposure bias commands (XU_EXPOSURE_VALUE_CONTROL, selector 0x09, signed little endian)
+INSTA360_EXPOSURE_BIAS_SELECTOR = 0x09
+INSTA360_EXPOSURE_BIAS_LENGTH = 2
 
-INSTA360_LINK2_EXPOSURE_BIAS_MIN = -100
-INSTA360_LINK2_EXPOSURE_BIAS_MAX = 100
-INSTA360_LINK2_EXPOSURE_BIAS_DEFAULT = 0
+# only used when the device reports no usable range, see read_signed_range()
+INSTA360_EXPOSURE_BIAS_MIN = -100
+INSTA360_EXPOSURE_BIAS_MAX = 100
+INSTA360_EXPOSURE_BIAS_DEFAULT = 0
 
 ## Device serial number (XU_DEVICE_SN_CONTROL, selector 0x0C, 32 bytes, read-only)
-INSTA360_LINK2_DEVICE_SN_SELECTOR = 0x0C
-INSTA360_LINK2_DEVICE_SN_LENGTH = 32
+INSTA360_DEVICE_SN_SELECTOR = 0x0C
+INSTA360_DEVICE_SN_LENGTH = 32
 
 ## Tracking speed commands (XU_TRACK_SPEED_CONTROL, selector 0x12, 1 byte)
-INSTA360_LINK2_TRACK_SPEED_SELECTOR = 0x12
-INSTA360_LINK2_TRACK_SPEED_LENGTH = 1
+INSTA360_TRACK_SPEED_SELECTOR = 0x12
+INSTA360_TRACK_SPEED_LENGTH = 1
 
-INSTA360_LINK2_TRACK_SPEED_SLOW = 1
-INSTA360_LINK2_TRACK_SPEED_MEDIUM = 2
-INSTA360_LINK2_TRACK_SPEED_FAST = 3
+INSTA360_TRACK_SPEED_SLOW = 1
+INSTA360_TRACK_SPEED_MEDIUM = 2
+INSTA360_TRACK_SPEED_FAST = 3
 
 ## Function status (XU_FUNC_STATUS_CONTROL, selector 0x1B, 2 byte bitmask)
-INSTA360_LINK2_FUNC_STATUS_SELECTOR = 0x1B
-INSTA360_LINK2_FUNC_STATUS_LENGTH = 2
-INSTA360_LINK2_FUNC_STATUS_BIT_GESTURE_ALL = 0x10
+INSTA360_FUNC_STATUS_SELECTOR = 0x1B
+INSTA360_FUNC_STATUS_LENGTH = 2
+INSTA360_FUNC_STATUS_BIT_GESTURE_ALL = 0x10
 
-class Insta360Link2Ctrl(BaseCtrl):
+## Manual exposure, gen 1 Link only (XU_EXPOSURE_MODE 0x1E, XU_EXPOSURE_TIME 0x19)
+INSTA360_EXPOSURE_MODE_SELECTOR = 0x1e
+INSTA360_EXPOSURE_MODE_LENGTH = 1
+
+INSTA360_EXPOSURE_MODE_MANUAL = 1
+INSTA360_EXPOSURE_MODE_AUTO = 2
+
+INSTA360_EXPOSURE_TIME_SELECTOR = 0x19
+INSTA360_EXPOSURE_TIME_LENGTH = 2
+
+# exposure time in microseconds, only settable while the exposure mode is manual
+INSTA360_SHUTTER_PRESETS = [
+    ('1/30s', 33333),
+    ('1/60s', 16667),
+    ('1/125s', 8000),
+    ('1/250s', 4000),
+    ('1/500s', 2000),
+    ('1/1000s', 1000),
+    ('1/2000s', 500),
+    ('1/4000s', 250),
+]
+INSTA360_SHUTTER_DEFAULT = 1  # 1/60s
+
+def insta360_shutter_format(scale, value):
+    idx = int(value)
+    if 0 <= idx < len(INSTA360_SHUTTER_PRESETS):
+        return INSTA360_SHUTTER_PRESETS[idx][0]
+    return f'{idx}'
+
+class Insta360Ctrl(BaseCtrl):
     def __init__(self, text_id, name, type, tooltip, selector, length, menu=None,
-                 min=None, max=None, default=None, readonly=False, gesture_bit=None):
+                 min=None, max=None, step=None, default=None, readonly=False, gesture_bit=None,
+                 format_value=None, scale_class=None):
         super().__init__(text_id, name, type, tooltip=tooltip, menu=menu or [],
-                         min=min, max=max, default=default, readonly=readonly)
+                         min=min, max=max, step=step, default=default, readonly=readonly,
+                         format_value=format_value, scale_class=scale_class)
         self.selector = selector
         self.length = length
         self.gesture_bit = gesture_bit
+        self.hidden = False
 
-class Insta360Link2Ctrls:
+class Insta360Ctrls:
     def __init__(self, device, fd):
         self.device = device
         self.fd = fd
-        self.unit_id = find_unit_id_in_sysfs(device, INSTA360_LINK2_GUID)
+        self.unit_id = find_unit_id_in_sysfs(device, INSTA360_GUID)
         self.usb_ids = find_usb_ids_in_sysfs(device)
         self.get_device_controls()
 
     def supported(self):
-        return self.unit_id != 0 and self.usb_ids in INSTA360_LINK2_DEV_MATCH
+        return self.unit_id != 0 and self.usb_ids in INSTA360_DEV_MATCH
+
+    def query(self, selector, length, query):
+        buf = to_buf(bytes(length))
+        query_xu_control(self.fd, self.unit_id, selector, query, buf)
+        return bytes(buf)
+
+    def read(self, selector, length):
+        return self.query(selector, length, UVC_GET_CUR)
+
+    def write(self, selector, data):
+        query_xu_control(self.fd, self.unit_id, selector, UVC_SET_CUR, to_buf(data))
+
+    # The Link 2 family reports a signed range over the full control length, the gen 1 Link
+    # keeps it in the low byte, so its -4..4 decodes to 252..4 over two bytes. Reinterpret
+    # when the minimum lands above the maximum, fall back when the device reports nothing.
+    def read_signed_range(self, selector, length, min_fallback, max_fallback):
+        min_raw = self.query(selector, length, UVC_GET_MIN)
+        max_raw = self.query(selector, length, UVC_GET_MAX)
+        vmin = int.from_bytes(min_raw, 'little', signed=True)
+        vmax = int.from_bytes(max_raw, 'little', signed=True)
+        if vmin > vmax:
+            vmin = int.from_bytes(min_raw[:1], 'little', signed=True)
+            vmax = int.from_bytes(max_raw[:1], 'little', signed=True)
+        if vmin >= vmax:
+            return min_fallback, max_fallback
+        return vmin, vmax
 
     def get_device_controls(self):
         if not self.supported():
             self.ctrls = []
             return
 
+        bias_min, bias_max = self.read_signed_range(
+            INSTA360_EXPOSURE_BIAS_SELECTOR, INSTA360_EXPOSURE_BIAS_LENGTH,
+            INSTA360_EXPOSURE_BIAS_MIN, INSTA360_EXPOSURE_BIAS_MAX,
+        )
+
         self.ctrls = [
-            Insta360Link2Ctrl(
-                'insta360_link2_track_speed',
+            Insta360Ctrl(
+                'insta360_track_speed',
                 'Tracking Speed',
                 'menu',
                 'Set the speed of the AI face/body tracking',
-                INSTA360_LINK2_TRACK_SPEED_SELECTOR,
-                INSTA360_LINK2_TRACK_SPEED_LENGTH,
+                INSTA360_TRACK_SPEED_SELECTOR,
+                INSTA360_TRACK_SPEED_LENGTH,
                 menu=[
-                    BaseCtrlMenu('slow', 'Slow', INSTA360_LINK2_TRACK_SPEED_SLOW),
-                    BaseCtrlMenu('medium', 'Medium', INSTA360_LINK2_TRACK_SPEED_MEDIUM),
-                    BaseCtrlMenu('fast', 'Fast', INSTA360_LINK2_TRACK_SPEED_FAST),
+                    BaseCtrlMenu('slow', 'Slow', INSTA360_TRACK_SPEED_SLOW),
+                    BaseCtrlMenu('medium', 'Medium', INSTA360_TRACK_SPEED_MEDIUM),
+                    BaseCtrlMenu('fast', 'Fast', INSTA360_TRACK_SPEED_FAST),
                 ],
             ),
-            Insta360Link2Ctrl(
-                'insta360_link2_gesture_palm',
+            Insta360Ctrl(
+                'insta360_gesture_palm',
                 'Gesture: Palm',
                 'boolean',
                 'Enable or disable the Palm gesture (toggles AI tracking on/off)',
-                INSTA360_LINK2_GESTURE_SELECTOR,
-                INSTA360_LINK2_GESTURE_LENGTH,
-                gesture_bit=INSTA360_LINK2_GESTURE_BIT_PALM,
+                INSTA360_GESTURE_SELECTOR,
+                INSTA360_GESTURE_LENGTH,
+                gesture_bit=INSTA360_GESTURE_BIT_PALM,
             ),
-            Insta360Link2Ctrl(
-                'insta360_link2_gesture_l',
+            Insta360Ctrl(
+                'insta360_gesture_l',
                 'Gesture: L',
                 'boolean',
                 'Enable or disable the L gesture (controls zoom)',
-                INSTA360_LINK2_GESTURE_SELECTOR,
-                INSTA360_LINK2_GESTURE_LENGTH,
-                gesture_bit=INSTA360_LINK2_GESTURE_BIT_L,
+                INSTA360_GESTURE_SELECTOR,
+                INSTA360_GESTURE_LENGTH,
+                gesture_bit=INSTA360_GESTURE_BIT_L,
             ),
-            Insta360Link2Ctrl(
-                'insta360_link2_gesture_v',
+            Insta360Ctrl(
+                'insta360_gesture_v',
                 'Gesture: V',
                 'boolean',
                 'Enable or disable the V gesture (toggles whiteboard mode)',
-                INSTA360_LINK2_GESTURE_SELECTOR,
-                INSTA360_LINK2_GESTURE_LENGTH,
-                gesture_bit=INSTA360_LINK2_GESTURE_BIT_V,
+                INSTA360_GESTURE_SELECTOR,
+                INSTA360_GESTURE_LENGTH,
+                gesture_bit=INSTA360_GESTURE_BIT_V,
             ),
-            Insta360Link2Ctrl(
-                'insta360_link2_exposure_bias',
+            Insta360Ctrl(
+                'insta360_exposure_bias',
                 'Exposure Bias',
                 'integer',
                 'Signed exposure bias adjustment',
-                INSTA360_LINK2_EXPOSURE_BIAS_SELECTOR,
-                INSTA360_LINK2_EXPOSURE_BIAS_LENGTH,
-                min=INSTA360_LINK2_EXPOSURE_BIAS_MIN,
-                max=INSTA360_LINK2_EXPOSURE_BIAS_MAX,
-                default=INSTA360_LINK2_EXPOSURE_BIAS_DEFAULT,
+                INSTA360_EXPOSURE_BIAS_SELECTOR,
+                INSTA360_EXPOSURE_BIAS_LENGTH,
+                min=bias_min,
+                max=bias_max,
+                step=1,
+                default=INSTA360_EXPOSURE_BIAS_DEFAULT,
             ),
-            Insta360Link2Ctrl(
-                'insta360_link2_serial',
+            Insta360Ctrl(
+                'insta360_serial',
                 'Serial Number',
                 'info',
                 'Device serial number (read-only)',
-                INSTA360_LINK2_DEVICE_SN_SELECTOR,
-                INSTA360_LINK2_DEVICE_SN_LENGTH,
+                INSTA360_DEVICE_SN_SELECTOR,
+                INSTA360_DEVICE_SN_LENGTH,
                 readonly=True,
             ),
         ]
 
-        gesture_buf = to_buf(bytes(INSTA360_LINK2_GESTURE_LENGTH))
-        query_xu_control(self.fd, self.unit_id, INSTA360_LINK2_GESTURE_SELECTOR, UVC_GET_CUR, gesture_buf)
-        gesture_mask = bytes(gesture_buf)[0]
+        if self.usb_ids == INSTA360_LINK:
+            self.ctrls += [
+                Insta360Ctrl(
+                    'insta360_exposure_mode',
+                    'Exposure Mode',
+                    'menu',
+                    'Exposure mode, set it to manual to control the shutter speed',
+                    INSTA360_EXPOSURE_MODE_SELECTOR,
+                    INSTA360_EXPOSURE_MODE_LENGTH,
+                    menu=[
+                        BaseCtrlMenu('auto', 'Auto', INSTA360_EXPOSURE_MODE_AUTO),
+                        BaseCtrlMenu('manual', 'Manual', INSTA360_EXPOSURE_MODE_MANUAL),
+                    ],
+                    default='auto',
+                ),
+                Insta360Ctrl(
+                    'insta360_shutter',
+                    'Shutter Speed',
+                    'integer',
+                    'Shutter speed, only effective in manual exposure mode',
+                    INSTA360_EXPOSURE_TIME_SELECTOR,
+                    INSTA360_EXPOSURE_TIME_LENGTH,
+                    min=0,
+                    max=len(INSTA360_SHUTTER_PRESETS) - 1,
+                    step=1,
+                    default=INSTA360_SHUTTER_DEFAULT,
+                    format_value=insta360_shutter_format,
+                    scale_class='dark-to-light',
+                ),
+            ]
+
+        gesture_mask = self.read(INSTA360_GESTURE_SELECTOR, INSTA360_GESTURE_LENGTH)[0]
 
         for c in self.ctrls:
             if c.gesture_bit is not None:
                 c.value = (gesture_mask & c.gesture_bit) == c.gesture_bit
                 continue
 
-            buf = to_buf(bytes(c.length))
-            query_xu_control(self.fd, self.unit_id, c.selector, UVC_GET_CUR, buf)
-            if c.text_id == 'insta360_link2_track_speed':
-                speed_val = bytes(buf)[0]
+            buf = self.read(c.selector, c.length)
+            if c.text_id == 'insta360_track_speed':
+                speed_val = buf[0]
                 valmenu = find_by_value(c.menu, speed_val)
                 c.value = valmenu.text_id if valmenu else str(speed_val)
-            elif c.text_id == 'insta360_link2_exposure_bias':
-                c.value = int.from_bytes(bytes(buf)[:2], byteorder='little', signed=True)
-            elif c.text_id == 'insta360_link2_serial':
-                c.value = bytes(buf).rstrip(b'\x00').decode('ascii', errors='replace')
+            elif c.text_id == 'insta360_exposure_bias':
+                value = int.from_bytes(buf[:2], byteorder='little', signed=True)
+                c.value = max(c.min, min(c.max, value))
+            elif c.text_id == 'insta360_serial':
+                c.value = buf.rstrip(b'\x00').decode('ascii', errors='replace')
+            elif c.text_id == 'insta360_exposure_mode':
+                valmenu = find_by_value(c.menu, buf[0])
+                c.value = valmenu.text_id if valmenu else 'auto'
+            elif c.text_id == 'insta360_shutter':
+                c.value = self.closest_shutter(int.from_bytes(buf[:2], byteorder='little'))
+
+        self.update_shutter_visibility()
+
+    def closest_shutter(self, us):
+        diffs = [abs(preset_us - us) for _, preset_us in INSTA360_SHUTTER_PRESETS]
+        return diffs.index(min(diffs))
+
+    # the shutter speed is ignored outside manual exposure mode, so don't offer it there
+    def update_shutter_visibility(self):
+        shutter_ctrl = find_by_text_id(self.ctrls, 'insta360_shutter')
+        mode_ctrl = find_by_text_id(self.ctrls, 'insta360_exposure_mode')
+        if shutter_ctrl is None or mode_ctrl is None:
+            return
+        shutter_ctrl.hidden = mode_ctrl.value != 'manual'
 
     def setup_ctrls(self, params, errs):
         if not self.supported():
             return
 
-        gesture_buf = to_buf(bytes(INSTA360_LINK2_GESTURE_LENGTH))
-        query_xu_control(self.fd, self.unit_id, INSTA360_LINK2_GESTURE_SELECTOR, UVC_GET_CUR, gesture_buf)
-        gesture_mask = bytes(gesture_buf)[0]
+        gesture_mask = self.read(INSTA360_GESTURE_SELECTOR, INSTA360_GESTURE_LENGTH)[0]
         gesture_mask_orig = gesture_mask
 
-        func_buf = to_buf(bytes(INSTA360_LINK2_FUNC_STATUS_LENGTH))
-        query_xu_control(self.fd, self.unit_id, INSTA360_LINK2_FUNC_STATUS_SELECTOR, UVC_GET_CUR, func_buf)
-        _func_buf = bytes(func_buf)
-        func_mask = _func_buf[0] | (_func_buf[1] << 8)
+        func_buf = self.read(INSTA360_FUNC_STATUS_SELECTOR, INSTA360_FUNC_STATUS_LENGTH)
+        func_mask = func_buf[0] | (func_buf[1] << 8)
         func_mask_orig = func_mask
 
         for k, v in params.items():
@@ -2422,33 +2392,37 @@ class Insta360Link2Ctrls:
             if ctrl.type == 'menu':
                 menu = find_by_text_id(ctrl.menu, v)
                 if menu is None:
-                    collect_warning(f'Insta360Link2Ctrls: can\'t find {v} in {[c.text_id for c in ctrl.menu]}', errs)
+                    collect_warning(f'Insta360Ctrls: can\'t find {v} in {[c.text_id for c in ctrl.menu]}', errs)
                     continue
 
-                buf = to_buf(bytes(ctrl.length))
-                buf[0] = menu.value
-                query_xu_control(self.fd, self.unit_id, ctrl.selector, UVC_SET_CUR, buf)
+                self.write(ctrl.selector, menu.value.to_bytes(ctrl.length, byteorder='little'))
                 ctrl.value = v
             elif ctrl.type == 'integer':
-                if ctrl.text_id == 'insta360_link2_exposure_bias':
+                if ctrl.text_id == 'insta360_shutter':
+                    idx = int(v)
+                    if idx < 0 or idx >= len(INSTA360_SHUTTER_PRESETS):
+                        collect_warning(f'Insta360Ctrls: shutter index {idx} out of range', errs)
+                        continue
+                    us = INSTA360_SHUTTER_PRESETS[idx][1]
+                    self.write(ctrl.selector, us.to_bytes(ctrl.length, byteorder='little'))
+                    ctrl.value = idx
+                else:
                     val_int = int(v)
-                    buf = to_buf(val_int.to_bytes(ctrl.length, byteorder='little', signed=True))
-                    query_xu_control(self.fd, self.unit_id, ctrl.selector, UVC_SET_CUR, buf)
+                    self.write(ctrl.selector, val_int.to_bytes(ctrl.length, byteorder='little', signed=True))
                     ctrl.value = val_int
 
+        self.update_shutter_visibility()
+
         if gesture_mask != gesture_mask_orig:
-            gesture_buf[0] = gesture_mask
-            query_xu_control(self.fd, self.unit_id, INSTA360_LINK2_GESTURE_SELECTOR, UVC_SET_CUR, gesture_buf)
+            self.write(INSTA360_GESTURE_SELECTOR, bytes([gesture_mask]))
 
         if gesture_mask:
-            func_mask |= INSTA360_LINK2_FUNC_STATUS_BIT_GESTURE_ALL
+            func_mask |= INSTA360_FUNC_STATUS_BIT_GESTURE_ALL
         else:
-            func_mask &= ~INSTA360_LINK2_FUNC_STATUS_BIT_GESTURE_ALL & 0xFFFF
+            func_mask &= ~INSTA360_FUNC_STATUS_BIT_GESTURE_ALL & 0xFFFF
 
         if func_mask != func_mask_orig:
-            func_buf[0] = func_mask & 0xFF
-            func_buf[1] = (func_mask >> 8) & 0xFF
-            query_xu_control(self.fd, self.unit_id, INSTA360_LINK2_FUNC_STATUS_SELECTOR, UVC_SET_CUR, func_buf)
+            self.write(INSTA360_FUNC_STATUS_SELECTOR, func_mask.to_bytes(INSTA360_FUNC_STATUS_LENGTH, byteorder='little'))
 
     def get_ctrls(self):
         return self.ctrls
@@ -3484,8 +3458,7 @@ class CameraCtrls:
             LogitechCtrls(device, fd),
             DellUltraSharpCtrls(device, fd),
             AnkerWorkCtrls(device, fd),
-            Insta360LinkCtrls(device, fd),
-            Insta360Link2Ctrls(device, fd),
+            Insta360Ctrls(device, fd),
             SystemdSaver(self),
             ColorPreset(self),
             ConfigPreset(self),
@@ -3550,6 +3523,11 @@ class CameraCtrls:
         ctrls = self.get_ctrls()
         pages = [
             CtrlPage('Basic', [
+                CtrlCategory('Gestures', pop_list_by_text_ids(ctrls, [
+                    'insta360_gesture_palm',
+                    'insta360_gesture_l',
+                    'insta360_gesture_v',
+                ])),
                 CtrlCategory('Crop',
                     pop_list_by_text_ids(ctrls, [
                         'kiyo_pro_fov',
@@ -3562,7 +3540,7 @@ class CameraCtrls:
                         'ankerwork_fov',
                         'ankerwork_auto_framing',
                         'ankerwork_hor_flip',
-                        'insta360_link2_track_speed',
+                        'insta360_track_speed',
                     ]) +
                     pop_list_by_ids(ctrls, [
                         V4L2_CID_ZOOM_ABSOLUTE,
@@ -3593,7 +3571,7 @@ class CameraCtrls:
                     pop_list_by_text_ids(ctrls, ['kiyo_pro_af_mode', 'logitech_motor_focus', 'ankerwork_face_focus'])
                 ),
             ]),
-            CtrlPage('Test', [
+            CtrlPage('Exposure', [
                 CtrlCategory('Exposure', pop_list_by_ids(ctrls, [
                     V4L2_CID_EXPOSURE_AUTO,
                     V4L2_CID_EXPOSURE_ABSOLUTE,
@@ -3615,7 +3593,7 @@ class CameraCtrls:
                     V4L2_CID_CAMERA_ORIENTATION,
                     V4L2_CID_CAMERA_SENSOR_ROTATION,
                 ]) +
-                    pop_list_by_text_ids(ctrls, ['insta360_link_exposure_mode', 'insta360_link_shutter'])
+                    pop_list_by_text_ids(ctrls, ['insta360_exposure_mode', 'insta360_shutter'])
                 ),
                 CtrlCategory('ISO', pop_list_by_ids(ctrls, [V4L2_CID_ISO_SENSITIVITY, V4L2_CID_ISO_SENSITIVITY_AUTO])),
                 CtrlCategory('Dynamic Range',
@@ -3630,7 +3608,7 @@ class CameraCtrls:
                         'ankerwork_hdr',
                         'ankerwork_face_compensation_enable',
                         'ankerwork_face_compensation_value',
-                        'insta360_link2_exposure_bias',
+                        'insta360_exposure_bias',
                     ])
                 ),
             ]),
@@ -3673,7 +3651,7 @@ class CameraCtrls:
             ]),
             CtrlPage('Capture', [
                 CtrlCategory('Capture', pop_list_by_text_ids(ctrls, ['pixelformat', 'resolution', 'fps'])),
-                CtrlCategory('Info', pop_list_by_text_ids(ctrls, ['card', 'driver', 'path', 'real_path', 'insta360_link2_serial'])),
+                CtrlCategory('Info', pop_list_by_text_ids(ctrls, ['card', 'driver', 'path', 'real_path', 'insta360_serial'])),
             ]),
             CtrlPage('Settings', [
                 CtrlCategory('Save', pop_list_by_text_ids(ctrls, ['kiyo_pro_save', 'preset'])),
