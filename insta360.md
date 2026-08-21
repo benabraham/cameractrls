@@ -477,74 +477,76 @@ grep -a -o 'Webcam::CameraInsta::[A-Za-z0-9_]*' 'Insta360 Link Controller.exe' |
 grep -a -o 'support[A-Z][A-Za-z0-9]*' 'Insta360 Link Controller.exe' | sort -u
 ```
 
-## 🪟 OFFICIAL WINDOWS UI — COMPLETE OPTION INVENTORY
+## 🪟 OFFICIAL WINDOWS UI — EVERY OPTION, AND WHETHER IT IS MAPPED
 
-Source: 8 screenshots of **Insta360 Link Controller** taken 2025-12-10, this camera
-(serial IBJLA23066B543). They live in `../` (one level above this repo, untracked):
-`Screenshot 2025-12-10 2003 50 / 2004 20 / 2004 34 / 2005 02 / 2005 25 / 2005 39 / 2005 54 / 2006 27.png`,
-originals also at `/mnt/winos/Users/DanielSrb/Downloads/`.
+Source: the 8 screenshots of Insta360 Link Controller taken 2025-12-10 on this camera
+(`../Screenshot 2025-12-10 2005*.png`, originals in `/mnt/winos/Users/DanielSrb/Downloads/`).
 
-This is the full set of options the vendor app offers, i.e. the ceiling for what the
-firmware can do. Everything not already covered by V4L2 has to come from an XU.
+✅ usable from Linux today · ⚠️ partly mapped or unverified · ❌ not mapped
 
 ### View tab
 
-| Option | Values seen | Linux status |
+| UI control | Mapped | How |
 |---|---|---|
-| View Adjustment: pan / tilt d-pad | — | ✅ V4L2 `pan_absolute` / `tilt_absolute` |
-| View Adjustment: zoom | 1.2x shown | ✅ V4L2 `zoom_absolute` (100-400) |
-| Presets | user-added slots (+) | 🔍 unit 10 selectors 0x03-0x05 suspected |
-| Smart Composition | toggle | 🔍 unmapped |
-| Composition framing | Head / Half Body / Whole Body | 🔍 unmapped |
-| **Tracking Speed** | **Quick / Ordinary / Slow** | ✅ selector 0x12 (1/2/3) |
-| Enable Auto Tracking | toggle | 🔍 unmapped (likely a 0x1b bit) |
+| View Adjustment — pan / tilt d-pad | ✅ | V4L2 `pan_absolute` / `tilt_absolute`, also XU 0x1a |
+| View Adjustment — zoom in / out, shows 1.2x | ✅ | V4L2 `zoom_absolute`, 100-400 |
+| Presets (+) | ❌ | unit 10 selectors 0x03-0x05 suspected, all read zero. cameractrls has its own host-side preset system, which is not the same thing |
+| Smart Composition toggle | ❌ | separate from the framing choice below |
+| Composition — Head / Half Body / Whole Body | ✅ | XU 0x13, `insta360_composition`. Direction confirmed with a person in frame, effect weak at distance |
+| Tracking Speed — Quick / Ordinary / Slow | ✅ | XU 0x12, `insta360_track_speed`, 1 slow 2 medium 3 fast, confirmed blind |
+| Enable Auto Tracking | ❌ | reachable in practice by firing the palm gesture, but no direct control |
 
-Note the official names are **Quick / Ordinary / Slow**, PR #101 labels them fast /
-medium / slow. Which integer maps to which is still unproven on gen 1.
+### Effects tab
 
-### Effects tab (Color)
-
-| Option | Values seen | Linux status |
+| UI control | Mapped | How |
 |---|---|---|
-| Exposure | Auto / M switch | ✅ selector 0x1e |
-| — Auto: EV bias | **0.0EV .. 3.0EV** (±3 EV) | ✅ selector 0x09, 0.01 EV units, ±300 |
-| — Manual: ISO | **100 .. 3200** | ❌ selector unknown — but the app log proves one exists (0x1b and 0x16 both ruled out) |
-| — Manual: Shutter | **1/8000s .. 1/30s** | ✅ selector 0x19 (µs) |
-| — Manual: Exposure curve | editable curve + reset | 🔍 **selector 0x10 (255 byte table) is the prime suspect** |
-| Auto Focus | Auto / M + 0-100% | ✅ V4L2 `focus_automatic_continuous` / `focus_absolute` |
-| Temperature | Auto / M + **2000K .. 10000K** | ✅ V4L2 `white_balance_temperature` |
-| Brightness / Contrast / Saturation / Sharpness | 0-100% | ✅ V4L2 |
-| HDR | toggle | 🔍 **selector 0x07 (1 byte, settable, effect unknown) is the prime suspect** |
-| Anti-Flicker | dropdown, Auto | ✅ V4L2 `power_line_frequency` (roughly) |
-| Set as startup | toggle | host-side app setting, not a camera control |
+| Exposure Auto / M | ✅ | XU 0x1e, `insta360_exposure_mode` |
+| Exposure Compensation, ±3.0 EV | ✅ | XU 0x09, `insta360_exposure_bias`, 0.01 EV per unit, ±300 |
+| ISO, 100-3200 | ✅ | XU 0x19, `insta360_iso` |
+| Shutter, 1/30 - 1/8000 | ✅ | XU 0x1d, `insta360_shutter`, denominator |
+| Exposure curve, editable + reset | ⚠️ | XU 0x10 reads the 127-point LUT, **writes revert**. The app keeps its curve host-side |
+| Auto Focus Auto / M + value | ✅ | V4L2 `focus_automatic_continuous` / `focus_absolute` |
+| Temperature Auto / M, 2000-10000K | ✅ | V4L2 `white_balance_automatic` / `white_balance_temperature` |
+| Brightness / Contrast / Saturation / Sharpness | ✅ | V4L2 |
+| HDR | ❌ | **the one real gap.** Not an AE mode, not a low 0x1b bit, no selector of its own |
+| Anti-Flicker | ⚠️ | V4L2 `power_line_frequency` covers the same ground, but is not the app's control |
+| Set as startup | ❌ | `supportSetStartupParamsToCamera` says this is camera-side, selector unknown |
+| Color section reset (⟲) | ❌ | the app's `resetImageSettings`. Setting each control to its default is not identical |
 
 ### More tab
 
-| Option | Values seen | Linux status |
+| UI control | Mapped | How |
 |---|---|---|
-| **Gesture** master switch | on | ✅ selector 0x1b bit 0x10 |
-| — AI Tracking gesture | checkbox | ✅ 0x05 bit 0x02 (palm) |
-| — Whiteboard gesture | checkbox | ✅ 0x05 bit 0x08 (V) |
-| — Zoom gesture | checkbox | ✅ 0x05 bit 0x04 (L) |
-| Horizontal Flip | checkbox | 🔍 unmapped (no V4L2 hflip on this camera) |
-| Smart Adjustment | checkbox | 🔍 unmapped |
-| Horizontal fine-tuning | slider, centre 0, reset | 🔍 unmapped |
-| Portrait Resolution and High Frame rate | checkbox (Compatibility) | 🔍 unmapped, probably re-enumerates formats |
+| Gesture master switch | ✅ | XU 0x1b bit 0x10 |
+| Gesture — AI Tracking (palm) | ✅ | XU 0x05 bit 0x02, **verified by A/B** |
+| Gesture — Zoom (L) | ⚠️ | XU 0x05 bit 0x04, exposed and believed correct, never isolated in a test |
+| Gesture — Whiteboard (V) | ⚠️ | XU 0x05 bit 0x08, same |
+| Horizontal Flip | ❌ | `setMirrorChecked`. This camera exposes no V4L2 hflip |
+| Smart Adjustment | ❌ | `setSmartAdjustmentChecked` |
+| Horizontal fine-tuning + reset | ⚠️ | XU 0x18 XU_BIAS is the candidate. Writes are accepted and echoed, no measurable effect on pan/tilt or the frame |
+| Portrait Resolution and High Frame rate | ❌ | `setLowResolution` / `setForcedVertical`, would re-enumerate formats |
 
 ### Bottom bar
 
-Mode buttons **AI Tracking / Whiteboard / Overhead / DeskView**, resolution selector
-(1080p30), snapshot, record. The four modes are almost certainly bits in the 0x1b
-function status word — the same word the gesture master switch lives in.
+| UI control | Mapped | How |
+|---|---|---|
+| AI Tracking mode | ❌ | 0x02 XU_VIDEO_MODE_CONTROL, 52 bytes, unexplored |
+| Whiteboard mode | ❌ | same |
+| Overhead mode | ❌ | same |
+| DeskView mode | ❌ | same |
+| Resolution / format selector (1080p30) | ✅ | V4L2, `pixelformat` / `resolution` / `fps` |
+| Snapshot | ⚠️ | any capture tool does this host-side. The camera's own XU_TAKE_PICTURE 0x0a is unmapped |
+| Record | ✅ | host-side, any recorder |
+| Device switching | — | host-side app concept, not a camera feature |
 
-### Not camera controls at all
+### Score
 
-`%LOCALAPPDATA%/Insta360/Insta360 Link Controller/virtual_camera_params.json` shows
-beauty, background replace, bokeh/blur and spot are **host-side processing** on a
-virtual camera, not firmware features. Don't go looking for XU selectors for those.
-`en-US.json` in that folder is the full UI string table if more option names are needed.
+**19 of 33 controls usable from Linux**, 6 partly, 8 not at all. Everything in the Exposure
+group is now covered except HDR and the curve. The unmapped cluster is the AI/video-mode
+family — the four bottom-bar modes, Smart Composition, Auto Tracking — which all likely live
+in the same unexplored 52-byte 0x02 struct, plus the mirror/compatibility toggles.
 
-## 📋 WINDOWS FEATURES TO MAP
+## 📋 WINDOWS FEATURES TO MAP## 📋 WINDOWS FEATURES TO MAP
 
 From Windows Link Controller software:
 
