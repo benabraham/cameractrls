@@ -2148,6 +2148,14 @@ INSTA360_TRACK_SPEED_SLOW = 1
 INSTA360_TRACK_SPEED_MEDIUM = 2
 INSTA360_TRACK_SPEED_FAST = 3
 
+## Composition (XU_LAYOUT_STYLE_CONTROL, selector 0x13, 1 byte)
+INSTA360_COMPOSITION_SELECTOR = 0x13
+INSTA360_COMPOSITION_LENGTH = 1
+
+INSTA360_COMPOSITION_HEAD = 1
+INSTA360_COMPOSITION_HALF_BODY = 2
+INSTA360_COMPOSITION_WHOLE_BODY = 3
+
 ## Function status (XU_FUNC_STATUS_CONTROL, selector 0x1B, 2 byte bitmask)
 INSTA360_FUNC_STATUS_SELECTOR = 0x1B
 INSTA360_FUNC_STATUS_LENGTH = 2
@@ -2225,13 +2233,26 @@ class Insta360Ctrls:
                 'insta360_track_speed',
                 'Tracking Speed',
                 'menu',
-                'Set the speed of the AI face/body tracking',
+                'Speed of the AI face/body tracking, the vendor calls these Quick, Ordinary and Slow',
                 INSTA360_TRACK_SPEED_SELECTOR,
                 INSTA360_TRACK_SPEED_LENGTH,
                 menu=[
                     BaseCtrlMenu('slow', 'Slow', INSTA360_TRACK_SPEED_SLOW),
                     BaseCtrlMenu('medium', 'Medium', INSTA360_TRACK_SPEED_MEDIUM),
                     BaseCtrlMenu('fast', 'Fast', INSTA360_TRACK_SPEED_FAST),
+                ],
+            ),
+            Insta360Ctrl(
+                'insta360_composition',
+                'Composition',
+                'menu',
+                'How tightly the AI tracking frames you. The effect is subtle at distance',
+                INSTA360_COMPOSITION_SELECTOR,
+                INSTA360_COMPOSITION_LENGTH,
+                menu=[
+                    BaseCtrlMenu('head', 'Head', INSTA360_COMPOSITION_HEAD),
+                    BaseCtrlMenu('half_body', 'Half Body', INSTA360_COMPOSITION_HALF_BODY),
+                    BaseCtrlMenu('whole_body', 'Whole Body', INSTA360_COMPOSITION_WHOLE_BODY),
                 ],
             ),
             Insta360Ctrl(
@@ -2346,7 +2367,7 @@ class Insta360Ctrls:
                 continue
 
             buf = self.read(c.selector, c.length)
-            if c.text_id == 'insta360_track_speed':
+            if c.text_id in ('insta360_track_speed', 'insta360_composition'):
                 speed_val = buf[0]
                 valmenu = find_by_value(c.menu, speed_val)
                 c.value = valmenu.text_id if valmenu else str(speed_val)
@@ -3561,6 +3582,7 @@ class CameraCtrls:
                         'ankerwork_auto_framing',
                         'ankerwork_hor_flip',
                         'insta360_track_speed',
+                        'insta360_composition',
                     ]) +
                     pop_list_by_ids(ctrls, [
                         V4L2_CID_ZOOM_ABSOLUTE,

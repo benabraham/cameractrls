@@ -265,6 +265,51 @@ What it establishes:
 Anything still unmapped should be looked for here first: turn the knob in the app on
 Windows, then read the log line it produced.
 
+## 🙋 TEST LOG 2026-08-21, WITH A HUMAN IN FRAME
+
+The three things no measurement could settle, done with the user in front of the lens and a
+live ffplay preview keeping the stream up.
+
+### Gestures 0x05 — confirmed by A/B ✅
+
+| Step | Mask | Palm gesture |
+|---|---|---|
+| baseline | 0x0e | **fires**, AI tracking switched on |
+| palm bit cleared | 0x0c | **ignored** |
+| palm bit restored | 0x0e | **fires** again |
+
+So bit 0x02 of 0x05 really is the palm gesture, and it is independently addressable — the
+mask is not a global on/off. The L gesture was confirmed working with all bits restored, but
+**not** during the palm-off window, so L=0x04 and V=0x08 stay inferred from PR #101 rather
+than verified here.
+
+### Tracking speed 0x12 — confirmed by blind A/B ✅
+
+Values presented without telling the user which was which:
+
+| Setting | Value | User's read |
+|---|---|---|
+| A | 3 | "tracking speed fast seems" |
+| B | 1 | "this is slower then before" |
+
+PR #101's mapping is right: **1 slow, 2 medium, 3 fast**, which the vendor labels Slow,
+Ordinary and Quick.
+
+### Composition 0x13 — direction confirmed, effect is weak ⚠️
+
+Blind again: 3 first, then 1.
+
+| Value | User's read |
+|---|---|
+| 3 | "willing to show more of my body" |
+| 1 | "probably yes [tighter], but still doesn't zoom as much when I am more far away" |
+
+So 1 = Head, 2 = Half Body, 3 = Whole Body, matching the vendor labels, and the direction is
+real. **The effect is subtle and does not tighten much at distance** — and the user reports
+the same weakness in the Windows app, so this is firmware behaviour, not something missing
+on the Linux side. Worth saying plainly to anyone who tries this control and expects a hard
+crop.
+
 ## ☀️ TEST LOG 2026-08-21, DAYLIGHT
 
 Same method as the night run, `daylight-probe.py`, camera streaming 720p30 throughout.
@@ -633,8 +678,8 @@ recovered" below to redo it. ✅ = verified on this camera, gen 1, firmware v1.4
 | 0x0f | XU_DOWNLOAD_FILE / XU_AF_MODE | 12 | rw | aliased pair. Volatile |
 | 0x10 | XU_UPLOAD_FILE / XU_EXPOSURE_CURVE | 255 | rw* | ✅ **exposure curve LUT**: 127 × u16 LE at offset 1, identity ramp 0,0,4…500. Writes revert |
 | 0x11 | XU_USB_MODE_SWITCH_CONTROL | 1 | rw | 0. **Do not write** — it can change how the device enumerates |
-| 0x12 | XU_TRACK_SPEED_CONTROL | 1 | rw | ✅ tracking speed, 1/2/3 = Quick/Ordinary/Slow in vendor wording |
-| 0x13 | XU_LAYOUT_STYLE_CONTROL | 1 | rw | ✅ composition Head / Half Body / Whole Body. **1, 2, 3 accepted, 0 rejected** |
+| 0x12 | XU_TRACK_SPEED_CONTROL | 1 | rw | ✅ tracking speed, **1 slow, 2 medium, 3 fast**, confirmed by blind A/B. Vendor labels them Slow, Ordinary, Quick |
+| 0x13 | XU_LAYOUT_STYLE_CONTROL | 1 | rw | ✅ composition, **1 Head, 2 Half Body, 3 Whole Body**, 0 rejected. Direction confirmed with a person in frame, but the effect is weak at distance on this firmware |
 | 0x14 | XU_HEAD_LIST_CONTROL | 240 | ro | ✅ **detected head boxes as floats**. All-zero with nobody in frame, populated otherwise |
 | 0x15 | XU_TRACK_TARGET_CONTROL | 8 | rw | zeros |
 | 0x16 | XU_PANTILT_RELATIVE_CONTROL | 4 | rw | 768, 768 |
@@ -683,10 +728,11 @@ Those are app-level parameter ids, not selectors — they travel inside XU paylo
 2. [x] Find the real ISO selector — 0x19, verified
 3. [x] Identify 0x07 — microphone noise cancelling, not HDR
 4. [ ] Find the HDR toggle. Ruled out: AE modes, low 0x1b bits, any selector of its own. Left: the 0x02 video-mode struct or the command channel
-5. [ ] Confirm 0x13 layout style visually — needs a face in frame
-6. [ ] Confirm gesture bits and tracking speed — needs a human in front of the lens
-7. [ ] Test presets (unit 10 slots)
-8. [ ] Feed the gen 1 findings back into cameractrls PR #101 / issue #55
+5. [x] Confirm 0x13 layout style visually — direction confirmed, effect weak at distance
+6. [x] Confirm the palm gesture bit and tracking speed — both confirmed by blind A/B
+7. [ ] Confirm the L and V gesture bits individually, still inferred from PR #101
+8. [ ] Test presets (unit 10 slots)
+9. [ ] Feed the gen 1 findings back into cameractrls PR #101 / issue #55
 
 ---
 
