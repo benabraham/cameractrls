@@ -265,6 +265,84 @@ What it establishes:
 Anything still unmapped should be looked for here first: turn the knob in the app on
 Windows, then read the log line it produced.
 
+## ☀️ TEST LOG 2026-08-21, DAYLIGHT
+
+Same method as the night run, `daylight-probe.py`, camera streaming 720p30 throughout.
+
+### Exposure compensation 0x09 — the positive half works, it was scene-limited
+
+| 0x09 | +150 (+1.50 EV) | +300 (+3.00 EV) |
+|---|---|---|
+| mean | 182.2 | 222.4 |
+| p5 | 63 | 124 |
+
+Against a ~133 baseline. At night the positive half looked dead because the sensor had no
+headroom left, exactly as suspected — not a firmware limit. ✅
+
+### ISO ladder 0x19 at 1/60s
+
+| ISO | 100 | 200 | 400 | 800 | 1600 | 3200 |
+|---|---|---|---|---|---|---|
+| mean | 51.1 | 74.5 | 109.1 | 152.6 | 193.9 | 219.5 |
+
+Monotonic, compressing at the top as the frame clips. ✅
+
+### Shutter ladder 0x1d at ISO 400 — textbook halving
+
+| shutter | 1/30 | 1/60 | 1/125 | 1/250 | 1/500 | 1/1000 | 1/2000 | 1/4000 | 1/8000 |
+|---|---|---|---|---|---|---|---|---|---|
+| mean | 148.4 | 108.3 | 70.2 | 43.9 | 28.5 | 15.5 | 8.9 | 4.6 | 2.5 |
+
+Roughly halves per stop across nine stops. Readback quantises only at the slow end,
+30 → 29 and 60 → 59, the rest are exact. ✅
+
+### ⚠️ 0x1b bit 0x20 disconnects the camera
+
+Sweeping the function bitmask one bit at a time:
+
+| bit | result |
+|---|---|
+| 0x01 | sticks, no dynamic-range change |
+| 0x02 | **rejected**, readback never shows it |
+| 0x04 | sticks, no dynamic-range change |
+| 0x08 | sticks, dynamic range -5, within noise |
+| **0x20** | **camera dropped off the USB bus** |
+
+After that write the ioctl returned ENODEV, the stream died, and once the device came back
+0x1b read **0x0030** with every write to it failing **EPROTO** — including writes that would
+have cleared the bit. It cleared itself on the next re-enumeration. The device recovered on
+its own both times, but this is a hard hazard: **never write bits ≥ 0x20 to 0x1b.**
+`daylight-probe.py` now refuses to.
+
+### HDR is still not found, and three places have been ruled out
+
+The string table said HDR is an auto-exposure variant, so the spare 0x1e AE modes were the
+prime suspects. They are not it:
+
+| 0x1e | mean | p5 | reading |
+|---|---|---|---|
+| 2 (auto) | 140.1 | 32 | reference |
+| 0 | 141.4 | 32 | same as auto |
+| 3 | 63.9 | 6 | about a stop darker, range compressed by 70 |
+| 4 | 135.0 | 30 | same as auto |
+| 5 | 61.0 | 5 | same as mode 3 |
+
+Modes 3 and 5 pull everything down, highlights included — that is underexposure, not HDR,
+which would lift p5 while holding p95. Modes 0 and 4 are indistinguishable from auto.
+
+So HDR is not an AE mode, not one of the low function bits, and not a selector of its own.
+What is left: a field inside 0x02 XU_VIDEO_MODE_CONTROL (52 bytes, mostly unexplored), the
+function bits at 0x20 and above (which cannot be probed safely), or the command channel.
+
+### XU_BIAS 0x18 — writes take, effect not visible
+
+Low byte accepted at 0, 96, 128 and 255, echoed back every time, **pan/tilt never moved and
+the frame stayed within scene noise** (spatial delta ~5.4-6.0 against a 5.4 noise floor).
+Changing the high half moved the spatial delta to 11-15, which is suggestive but not
+conclusive against a live scene. If this is the Horizontal fine-tuning slider, its effect is
+too small for a 32x18 downsample to resolve. Needs a static scene and a full-resolution
+before/after.
+
 ## 🔤 WHAT THE APP'S OWN STRING TABLE GIVES AWAY
 
 `%LOCALAPPDATA%/Insta360/Insta360 Link Controller/translations/en-US.json`, 909 strings.
@@ -564,10 +642,10 @@ recovered" below to redo it. ✅ = verified on this camera, gen 1, firmware v1.4
 | 0x18 | XU_BIAS_CONTROL | 4 | rw | 48, 2643. Distinct from 0x09 — the ParamType enum groups PARAM_BIAS with the PTZ family, so this is likely the horizontal fine-tuning |
 | 0x19 | XU_ISO_CONTROL | 2 | rw | ✅ **ISO**. 100 → luminance 3.8, 400 → 10.2, 1600 → 26.4, 3200 → 40.5 |
 | 0x1a | XU_PANTILT_ABSOLUTE_CONTROL | 8 | rw | ✅ 2 × int32 LE in arc-seconds, matches the V4L2 pan/tilt |
-| 0x1b | XU_FUNC_ENABLE_CONTROL | 2 | rw | ✅ function bitmask, 0x10 = gestures enabled |
+| 0x1b | XU_FUNC_ENABLE_CONTROL | 2 | rw | ✅ function bitmask, 0x10 = gestures. **Never write bits ≥ 0x20, 0x20 drops the camera off the bus** |
 | 0x1c | XU_VIDEO_RES_CONTROL | 10 | rw | mirrors the active stream format, zeros while idle |
 | 0x1d | XU_EXPOSURE_TIME_ABSOLUTE_CONTROL | 2 | rw | ✅ **shutter as denominator**, 60 = 1/60s. 1/30 → 85.0, 1/120 → 38.4, 1/1000 → 14.9, 1/8000 → 8.2. Firmware quantises: 30 reads back 29 |
-| 0x1e | XU_AE_MODE_CONTROL | 1 | rw | ✅ exposure mode, 1 = manual, 2 = auto |
+| 0x1e | XU_AE_MODE_CONTROL | 1 | rw | ✅ exposure mode, 1 = manual, 2 = auto. 0 and 4 behave like auto, 3 and 5 are ~1 stop darker. None of them is HDR |
 
 Unit 9 exposes 30 selectors, one per enum entry that this firmware implements.
 
@@ -604,7 +682,7 @@ Those are app-level parameter ids, not selectors — they travel inside XU paylo
 1. [x] Write cameractrls extension class — now `Insta360Ctrls`, shared with the Link 2 family
 2. [x] Find the real ISO selector — 0x19, verified
 3. [x] Identify 0x07 — microphone noise cancelling, not HDR
-4. [ ] Find the HDR toggle. PARAM_HDR exists, so it is reachable, probably inside 0x02 or 0x1b
+4. [ ] Find the HDR toggle. Ruled out: AE modes, low 0x1b bits, any selector of its own. Left: the 0x02 video-mode struct or the command channel
 5. [ ] Confirm 0x13 layout style visually — needs a face in frame
 6. [ ] Confirm gesture bits and tracking speed — needs a human in front of the lens
 7. [ ] Test presets (unit 10 slots)
