@@ -265,6 +265,47 @@ What it establishes:
 Anything still unmapped should be looked for here first: turn the knob in the app on
 Windows, then read the log line it produced.
 
+## 🔤 WHAT THE APP'S OWN STRING TABLE GIVES AWAY
+
+`%LOCALAPPDATA%/Insta360/Insta360 Link Controller/translations/en-US.json`, 909 strings.
+Some of them answer questions the pixels could not.
+
+**The HDR lead.** Two strings pin down what HDR is:
+
+- `hdr_on_m_exposure`: *"After enabling HDR, manual exposure is temporarily not supported."*
+- `right_img_hdr_des`: *"Currently not supported for use at 4K and 50/60fps"*
+
+So HDR is **an auto-exposure variant, not an independent toggle** — it is mutually exclusive
+with manual exposure and constrained by sensor mode. That makes 0x1e XU_AE_MODE_CONTROL the
+place to look, not a bit in the 0x1b bitmask: 1 is manual, 2 is auto, and earlier probing
+found 0, 3, 4 and 5 are all accepted. One of those spare values is the likely HDR mode.
+`daylight-probe.py` tests them and watches **p5**, since HDR lifts shadows rather than
+shifting the mean.
+
+**Naming, straight from the vendor:**
+
+| Key | Label |
+|---|---|
+| `right_ptz_fast` / `right_ptz_normal` / `right_ptz_slow` | Quick / Ordinary / Slow |
+| `right_compose_head` / `_half` / `_whole` | Head / Half Body / Whole Body — matches 0x13 taking 1, 2, 3 |
+| `right_other_finetuning` | Horizontal fine-tuning — the manual slider, the XU_BIAS 0x18 candidate |
+| `horizontal_correction_tips` | a *separate* automatic horizontal correction, so don't conflate the two |
+| `right_img_exposure_com` | Exposure Compensation — our 0x09 |
+| `moreset_key_board` / `_Aerial` / `_smartAerial` | Whiteboard / Overhead / DeskView |
+
+Note the app's internal keys order tracking speed **fast, normal, slow** while the labels
+read Quick, Ordinary, Slow. PR #101 assumes 1=slow, 2=medium, 3=fast. This camera reads 1,
+and which integer means which is still unconfirmed — it needs a human to watch the gimbal.
+
+**Privacy mode has two hardware flavours**, and this camera is the gimbal one:
+`video_privacy_g_des` says *"lift the gimbal manually to exit Privacy Mode"* while
+`video_privacy_h_des` talks about a lens cover. Tilting the gimbal 90° down arms it, and
+`right_other_untilPrivacy` ("Mute in Privacy Mode") is the `setUltiPrivacyModeChecked` method.
+
+**Audio capture modes** behind PARAM_AUDIO_CAPTURE_MODE: standard, wide, focus, music, plus
+far / near / live-broadcast variants, the last of which "turns off AI noise-cancelation" —
+the same feature as XU_NOISE_CANCEL at 0x07.
+
 ## 🧬 THE CAMERA API SURFACE, STRAIGHT FROM THE BINARY
 
 `Webcam::CameraInsta::*` symbols survive in the exe, so the vendor's own camera class is
