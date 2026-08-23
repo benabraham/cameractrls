@@ -265,6 +265,77 @@ What it establishes:
 Anything still unmapped should be looked for here first: turn the knob in the app on
 Windows, then read the log line it produced.
 
+## 📡 2026-08-23 — DRIVING THE VENDOR APP FROM LINUX, AND WHAT IT REVEALED
+
+The Windows app has a phone remote behind a QR code. It is protobuf over a WebSocket, and
+reimplementing it turned the whole problem around: instead of guessing selectors, ask the
+app to perform a feature and read the selector off the bus.
+
+### Setup
+
+Windows 11 in libvirt with the camera passed through (`virsh attach-device`), the app
+running inside, and `usbmon` capturing bus 3 on the **host** — QEMU passes USB through
+usbfs, so every control transfer still crosses the host kernel and is visible.
+
+  sudo modprobe usbmon
+  sudo sh -c 'setsid timeout 240 cat /sys/kernel/debug/usb/usbmon/3u > cap.txt &'
+  ./insta360-ws.py --url '<qr url>' --set hdr=1 --set video_mode=2 ...
+  ./usbmon-xu.py cap.txt --writes-only --unit 9
+
+### The protocol, from the app's own web bundle
+
+The client is served at `http://IP:62017/v3/link/` and its chunk 226 carries the generated
+protobuf. The socket is `ws://IP:62016?token=<token>`, first message
+`Request{hasControlRequest, controlRequest{token}}`, heartbeat every 10s.
+
+| Request | | ValueChangeNotification | | UVCExtendRequest | |
+|---|---|---|---|---|---|
+| 4 | hasControlRequest | 1 | curDeviceSerialNum | 1 | curDeviceSerialNum |
+| 7 | hasValueChangeNotify | 2 | paramType | 2 | paramType |
+| 13 | controlRequest | 3 | newValue (string) | 3 | **selector** |
+| 16 | valueChangeNotify | 4 | ptzParam | 4 | repeated data |
+
+`insta360-ws.py` implements this in the standard library, WebSocket framing included, and
+can set any of the 61 ParamTypes by name. Confirmation that the enum extraction was right:
+the client sends `paramType:103` for preset save/switch, exactly PARAM_PRESET_POSITION.
+
+### 🎯 HDR found, plus two more, all in the 0x1b word
+
+26 features were driven three seconds apart. Lining the sends up against the capture:
+
+| Sent over the WebSocket | On the wire |
+|---|---|
+| `hdr=0` | `0x1b` ← `0x0010` |
+| `hdr=1` | `0x1b` ← `0x0014` |
+| `video_mode=2` | `0x02` ← `02` + 31 zero bytes |
+| `video_mode=3` | `0x02` ← `03` + 31 zero bytes |
+| `auto_track=1` | `0x1b` ← `0x0114` |
+| `composition_style_switch=1` | `0x1b` ← `0x0115` |
+| `composition_style_switch=0` | `0x1b` ← `0x0114` |
+| `anti_flick=0/1` | unit **5** selector 0x05 — the standard UVC power line frequency |
+
+So the function bitmask at 0x1b holds:
+
+| Bit | Meaning |
+|---|---|
+| **0x0001** | **Smart Composition** |
+| **0x0004** | **HDR** |
+| 0x0010 | gestures master switch |
+| **0x0100** | **AI Tracking** |
+| 0x0020 | **do not touch, drops the camera off the bus** |
+
+HDR was under our nose the whole time: the daylight bit sweep found 0x04 "sticks, no
+dynamic-range change" — because a flat, evenly lit room has no dynamic range for HDR to
+compress. Luminance testing could never have identified it. The vendor protocol could.
+
+`video_mode` writes its value as the first byte of a 32-byte payload at 0x02, so the four
+bottom-bar modes are one small struct away, not a mystery any more.
+
+Toggles that produced **no** unit 9 traffic at all: mirror horizontal and vertical,
+smart adjustment, fine tuning, `gesture_rock_switch`, `gesture_ok_switch`, `lower_res`.
+Either the app handles them host-side, or the gen 1 Link does not implement them — the two
+extra gestures are most likely Link 2 features.
+
 ## 🙋 TEST LOG 2026-08-21, WITH A HUMAN IN FRAME
 
 The three things no measurement could settle, done with the user in front of the lens and a
@@ -664,7 +735,7 @@ recovered" below to redo it. ✅ = verified on this camera, gen 1, firmware v1.4
 | Sel | Official name | Len | RW | Meaning / value seen |
 |---|---|---|---|---|
 | 0x01 | XU_EXEC_SCRIPT_CONTROL | 4 | rw | zeros |
-| 0x02 | XU_VIDEO_MODE_CONTROL | 52 | rw | AI Tracking / Whiteboard / Overhead / DeskView. Tail holds ints -33, -809, 0, 100 — looks like pan, tilt, ?, zoom×100 |
+| 0x02 | XU_VIDEO_MODE_CONTROL | 52 | rw | ✅ mode id in **byte 0** of a 32-byte write, captured from the vendor app. Tail holds pan, tilt, ?, zoom×100 |
 | 0x03 | XU_DEVICE_INFO_CONTROL | 170 | rw | ✅ serial, a UUID, and **firmware `v1.4.5.8_build1`** as strings |
 | 0x04 | XU_PTZ_CMD_CONTROL | 262 | rw | zeros |
 | 0x05 | XU_GESTURE_STATUS_CONTROL | 1 | rw | ✅ gesture bitmask: palm 0x02, L 0x04, V 0x08 |
@@ -689,7 +760,7 @@ recovered" below to redo it. ✅ = verified on this camera, gen 1, firmware v1.4
 | 0x18 | XU_BIAS_CONTROL | 4 | rw | 48, 2643. Distinct from 0x09 — the ParamType enum groups PARAM_BIAS with the PTZ family, so this is likely the horizontal fine-tuning |
 | 0x19 | XU_ISO_CONTROL | 2 | rw | ✅ **ISO**. 100 → luminance 3.8, 400 → 10.2, 1600 → 26.4, 3200 → 40.5 |
 | 0x1a | XU_PANTILT_ABSOLUTE_CONTROL | 8 | rw | ✅ 2 × int32 LE in arc-seconds, matches the V4L2 pan/tilt |
-| 0x1b | XU_FUNC_ENABLE_CONTROL | 2 | rw | ✅ function bitmask, 0x10 = gestures. **Never write bits ≥ 0x20, 0x20 drops the camera off the bus** |
+| 0x1b | XU_FUNC_ENABLE_CONTROL | 2 | rw | ✅ function bitmask: **0x01 smart composition, 0x04 HDR, 0x10 gestures, 0x100 AI tracking**. **Never write bits ≥ 0x20, 0x20 drops the camera off the bus** |
 | 0x1c | XU_VIDEO_RES_CONTROL | 10 | rw | mirrors the active stream format, zeros while idle |
 | 0x1d | XU_EXPOSURE_TIME_ABSOLUTE_CONTROL | 2 | rw | ✅ **shutter as denominator**, 60 = 1/60s. 1/30 → 85.0, 1/120 → 38.4, 1/1000 → 14.9, 1/8000 → 8.2. Firmware quantises: 30 reads back 29 |
 | 0x1e | XU_AE_MODE_CONTROL | 1 | rw | ✅ exposure mode, 1 = manual, 2 = auto. 0 and 4 behave like auto, 3 and 5 are ~1 stop darker. None of them is HDR |
@@ -729,7 +800,7 @@ Those are app-level parameter ids, not selectors — they travel inside XU paylo
 1. [x] Write cameractrls extension class — now `Insta360Ctrls`, shared with the Link 2 family
 2. [x] Find the real ISO selector — 0x19, verified
 3. [x] Identify 0x07 — microphone noise cancelling, not HDR
-4. [ ] Find the HDR toggle. Ruled out: AE modes, low 0x1b bits, any selector of its own. Left: the 0x02 video-mode struct or the command channel
+4. [x] Find the HDR toggle — 0x1b bit 0x04, captured from the vendor protocol
 5. [x] Confirm 0x13 layout style visually — direction confirmed, effect weak at distance
 6. [x] Confirm the palm gesture bit and tracking speed — both confirmed by blind A/B
 7. [ ] Confirm the L and V gesture bits individually, still inferred from PR #101

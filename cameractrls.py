@@ -2161,6 +2161,12 @@ INSTA360_FUNC_STATUS_SELECTOR = 0x1B
 INSTA360_FUNC_STATUS_LENGTH = 2
 INSTA360_FUNC_STATUS_BIT_GESTURE_ALL = 0x10
 
+# Captured off the wire while the vendor app's own remote protocol drove each feature,
+# see src/insta360.md. The bits sit in the same 0x1b word as the gesture master switch.
+INSTA360_FUNC_BIT_SMART_COMPOSITION = 0x0001
+INSTA360_FUNC_BIT_HDR = 0x0004
+INSTA360_FUNC_BIT_AUTO_TRACKING = 0x0100
+
 ## Manual exposure, gen 1 Link only
 ## XU_AE_MODE_CONTROL 0x1E, XU_ISO_CONTROL 0x19, XU_EXPOSURE_TIME_ABSOLUTE_CONTROL 0x1D
 INSTA360_EXPOSURE_MODE_SELECTOR = 0x1e
@@ -2192,13 +2198,14 @@ def insta360_shutter_format(scale, value):
 class Insta360Ctrl(BaseCtrl):
     def __init__(self, text_id, name, type, tooltip, selector, length, menu=None,
                  min=None, max=None, step=None, step_big=None, default=None, readonly=False,
-                 gesture_bit=None, format_value=None, scale_class=None):
+                 gesture_bit=None, func_bit=None, format_value=None, scale_class=None):
         super().__init__(text_id, name, type, tooltip=tooltip, menu=menu or [],
                          min=min, max=max, step=step, step_big=step_big, default=default,
                          readonly=readonly, format_value=format_value, scale_class=scale_class)
         self.selector = selector
         self.length = length
         self.gesture_bit = gesture_bit
+        self.func_bit = func_bit
         self.hidden = False
 
 class Insta360Ctrls:
@@ -2241,6 +2248,34 @@ class Insta360Ctrls:
                     BaseCtrlMenu('medium', 'Medium', INSTA360_TRACK_SPEED_MEDIUM),
                     BaseCtrlMenu('fast', 'Fast', INSTA360_TRACK_SPEED_FAST),
                 ],
+            ),
+            Insta360Ctrl(
+                'insta360_hdr',
+                'HDR',
+                'boolean',
+                'High dynamic range. The vendor app disables manual exposure while it is on, '
+                'and it is unsupported at 4K and at 50 or 60 fps',
+                INSTA360_FUNC_STATUS_SELECTOR,
+                INSTA360_FUNC_STATUS_LENGTH,
+                func_bit=INSTA360_FUNC_BIT_HDR,
+            ),
+            Insta360Ctrl(
+                'insta360_auto_tracking',
+                'AI Tracking',
+                'boolean',
+                'Follow the subject with the gimbal',
+                INSTA360_FUNC_STATUS_SELECTOR,
+                INSTA360_FUNC_STATUS_LENGTH,
+                func_bit=INSTA360_FUNC_BIT_AUTO_TRACKING,
+            ),
+            Insta360Ctrl(
+                'insta360_smart_composition',
+                'Smart Composition',
+                'boolean',
+                'Let the camera choose the framing while tracking',
+                INSTA360_FUNC_STATUS_SELECTOR,
+                INSTA360_FUNC_STATUS_LENGTH,
+                func_bit=INSTA360_FUNC_BIT_SMART_COMPOSITION,
             ),
             Insta360Ctrl(
                 'insta360_composition',
@@ -2360,10 +2395,15 @@ class Insta360Ctrls:
             ]
 
         gesture_mask = self.read(INSTA360_GESTURE_SELECTOR, INSTA360_GESTURE_LENGTH)[0]
+        func_mask = int.from_bytes(
+            self.read(INSTA360_FUNC_STATUS_SELECTOR, INSTA360_FUNC_STATUS_LENGTH), 'little')
 
         for c in self.ctrls:
             if c.gesture_bit is not None:
                 c.value = (gesture_mask & c.gesture_bit) == c.gesture_bit
+                continue
+            if c.func_bit is not None:
+                c.value = (func_mask & c.func_bit) == c.func_bit
                 continue
 
             buf = self.read(c.selector, c.length)
@@ -2418,12 +2458,16 @@ class Insta360Ctrls:
             if ctrl is None or ctrl.readonly:
                 continue
 
-            if ctrl.gesture_bit is not None:
-                if v:
-                    gesture_mask |= ctrl.gesture_bit
+            # a value from the command line arrives as a string, and '0' is truthy
+            if ctrl.gesture_bit is not None or ctrl.func_bit is not None:
+                enable = to_bool(v)
+                if ctrl.gesture_bit is not None:
+                    bit, mask = ctrl.gesture_bit, 0xFF
+                    gesture_mask = gesture_mask | bit if enable else gesture_mask & ~bit & mask
                 else:
-                    gesture_mask &= ~ctrl.gesture_bit & 0xFF
-                ctrl.value = v
+                    bit, mask = ctrl.func_bit, 0xFFFF
+                    func_mask = func_mask | bit if enable else func_mask & ~bit & mask
+                ctrl.value = enable
                 continue
 
             if ctrl.type == 'menu':
@@ -3583,6 +3627,8 @@ class CameraCtrls:
                         'ankerwork_hor_flip',
                         'insta360_track_speed',
                         'insta360_composition',
+                        'insta360_auto_tracking',
+                        'insta360_smart_composition',
                     ]) +
                     pop_list_by_ids(ctrls, [
                         V4L2_CID_ZOOM_ABSOLUTE,
@@ -3651,6 +3697,7 @@ class CameraCtrls:
                         'ankerwork_hdr',
                         'ankerwork_face_compensation_enable',
                         'ankerwork_face_compensation_value',
+                        'insta360_hdr',
                         'insta360_exposure_bias',
                     ])
                 ),
