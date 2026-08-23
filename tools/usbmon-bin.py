@@ -58,10 +58,31 @@ def main():
         return 1
 
     pending = {}
-    lines = []
+    count = 0
+    base = None
     deadline = time.time() + args.seconds
+    out = open(args.out, 'w')
+    owner = os.environ.get('SUDO_USER')
+    if owner:                                  # hand the file back before writing anything
+        try:
+            info = pwd.getpwnam(owner)
+            os.chown(args.out, info.pw_uid, info.pw_gid)
+        except (KeyError, OSError):
+            pass
     fd = os.open(node, os.O_RDONLY)
-    print(f'capturing {node} for {args.seconds:.0f}s, full payloads', file=sys.stderr)
+    print(f'capturing {node} for {args.seconds:.0f}s, full payloads -> {args.out}',
+          file=sys.stderr, flush=True)
+
+    def emit(stamp, unit, selector, breq, payload):
+        nonlocal count, base
+        if base is None:
+            base = stamp
+        count += 1
+        name = SELECTORS.get(selector, '?')
+        request = REQUESTS.get(breq, f'0x{breq:02x}')
+        out.write(f'{stamp - base:8.3f}s unit {unit:>2} 0x{selector:02x} {name:<24} '
+                  f'{request:<8} {len(payload) // 2:>3}B {payload}\n')
+        out.flush()
 
     try:
         while time.time() < deadline:
@@ -85,30 +106,17 @@ def main():
                     continue
                 selector, unit = wvalue >> 8, windex >> 8
                 if breq == 0x01:
-                    lines.append((stamp, unit, selector, breq, data.hex()))
+                    emit(stamp, unit, selector, breq, data.hex())
                 else:
                     pending[_id] = (stamp, unit, selector, breq)
             elif _id in pending and args.all:
                 stamp, unit, selector, breq = pending.pop(_id)
-                lines.append((stamp, unit, selector, breq, data.hex()))
+                emit(stamp, unit, selector, breq, data.hex())
     finally:
         os.close(fd)
+        out.close()
 
-    base = lines[0][0] if lines else 0
-    with open(args.out, 'w') as fh:
-        for stamp, unit, selector, breq, payload in lines:
-            name = SELECTORS.get(selector, '?')
-            request = REQUESTS.get(breq, f'0x{breq:02x}')
-            fh.write(f'{stamp - base:8.3f}s unit {unit:>2} 0x{selector:02x} {name:<24} '
-                     f'{request:<8} {len(payload) // 2:>3}B {payload}\n')
-    owner = os.environ.get('SUDO_USER')
-    if owner:
-        try:
-            info = pwd.getpwnam(owner)
-            os.chown(args.out, info.pw_uid, info.pw_gid)
-        except (KeyError, OSError):
-            pass
-    print(f'{len(lines)} extension-unit transfers -> {args.out}', file=sys.stderr)
+    print(f'{count} extension-unit transfers -> {args.out}', file=sys.stderr)
     return 0
 
 
