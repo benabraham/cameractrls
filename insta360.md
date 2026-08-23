@@ -336,6 +336,46 @@ smart adjustment, fine tuning, `gesture_rock_switch`, `gesture_ok_switch`, `lowe
 Either the app handles them host-side, or the gen 1 Link does not implement them — the two
 extra gestures are most likely Link 2 features.
 
+## 🗂️ THE COMPLETE FEATURE LIST, READ OUT OF THE APP
+
+`insta360-ws.py --dump-state` decodes the app's `DeviceInfoNotification`, which carries a
+`DeviceSettingInfo` — the app's own state model for the attached camera. This is the
+authoritative answer to "what can this camera do", straight from the vendor:
+
+    anti_flicker 1          auto_exposure True      auto_focus True     auto_track True
+    auto_white_balance True brightness 50           composition_style 1 contrast 50
+    exposure_compensation 0 fine_tuning 0.0         gesture_enabled True
+    gesture_palm True       gesture_l True          gesture_v True
+    gesture_ok False        gesture_rock False      hdr True
+    horizontally_mirror F   vertically_mirror F     iso 2               shutter 0
+    lower_res False         manual_focus 0          privacy_mode False
+    resolution horizontal   saturation 50           sharpening 50
+    single_tap_tracking F   smart_adjust False      support_virtual_camera False
+    track_forbidden_area F  track_speed 1           ver_screen_lock False
+    vertical_screen False   video_privacy_mode F    white_balance 6300
+    zoom 100 of 100-400     device_name Link-66B543 cur_preset_pos -1
+
+Two things worth noting. `gesture_ok` and `gesture_rock` **exist as fields** for this camera
+but driving them produced no extension-unit traffic, so the app tracks them while the gen 1
+firmware ignores them. And `iso: 2` / `shutter: 0` are **slider indices**, not the raw values
+the XU takes — the app converts.
+
+The device message also carries ten fields (56-65) that the app's own web client does not
+decode. Field 59 holds ascii-ish data including a colour, field 57 and 58 look like repeated
+int32 lists padded with -1, plausibly preset slots. Unexplored.
+
+### The selector map, confirmed by a second independent build
+
+The VM runs app 2.2.4.14, whose bundled `ControlSelector` enum is a clean 0-30 list with no
+aliases, where the installed 2025 build had three aliased pairs. **Every selector we rely on
+matches across both builds**: GESTURE_STATUS 5, NOISE_CANCEL 7, EXPOSURE_VALUE 9, DEVICE_SN
+12, TRACK_SPEED 18 (0x12), LAYOUT_STYLE 19 (0x13), BIAS 24 (0x18), ISO 25 (0x19),
+PANTILT_ABSOLUTE 26 (0x1a), FUNC_ENABLE 27 (0x1b), VIDEO_RES 28 (0x1c),
+EXPOSURE_TIME_ABSOLUTE 29 (0x1d), AE_MODE 30 (0x1e).
+
+The newer build dropped BLEND_DRAW, AF_MODE and EXPOSURE_CURVE, which were the aliases at 8,
+15 and 16 — consistent with the exposure curve living at 0x10 alongside UPLOAD_FILE.
+
 ## 🙋 TEST LOG 2026-08-21, WITH A HUMAN IN FRAME
 
 The three things no measurement could settle, done with the user in front of the lens and a
