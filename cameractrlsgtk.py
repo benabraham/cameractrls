@@ -550,6 +550,9 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
     def handle_ptz_speed_key_pressed(self, w, e):
         keyval = e.keyval
         state = e.state
+        # a camera can expose one axis without the other, or neither
+        if self.pan_speed_sc is None or self.tilt_speed_sc is None:
+            return False
         pan_lower = self.pan_speed_sc.get_adjustment().get_lower()
         pan_upper =self.pan_speed_sc.get_adjustment().get_upper()
         tilt_lower = self.tilt_speed_sc.get_adjustment().get_lower()
