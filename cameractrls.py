@@ -2148,6 +2148,22 @@ INSTA360_TRACK_SPEED_SLOW = 1
 INSTA360_TRACK_SPEED_MEDIUM = 2
 INSTA360_TRACK_SPEED_FAST = 3
 
+## Gimbal speed (XU_PANTILT_RELATIVE_CONTROL, selector 0x16, 4 bytes)
+## [pan sign, pan magnitude, tilt sign, tilt magnitude], sign 0x01 up/right, 0xff down/left,
+## 0x00 with magnitude 1 is the idle state the vendor app sends to stop.
+INSTA360_PANTILT_RELATIVE_SELECTOR = 0x16
+INSTA360_PANTILT_RELATIVE_LENGTH = 4
+INSTA360_PANTILT_SPEED_MAX = 30
+
+## Video mode (XU_VIDEO_MODE_CONTROL, selector 0x02, mode id in byte 0 of 52)
+INSTA360_VIDEO_MODE_SELECTOR = 0x02
+INSTA360_VIDEO_MODE_LENGTH = 52
+
+INSTA360_VIDEO_MODE_NORMAL = 0
+INSTA360_VIDEO_MODE_WHITEBOARD = 4
+INSTA360_VIDEO_MODE_OVERHEAD = 5
+INSTA360_VIDEO_MODE_DESKVIEW = 6
+
 ## Composition (XU_LAYOUT_STYLE_CONTROL, selector 0x13, 1 byte)
 INSTA360_COMPOSITION_SELECTOR = 0x13
 INSTA360_COMPOSITION_LENGTH = 1
@@ -2203,11 +2219,11 @@ class Insta360Ctrl(BaseCtrl):
     def __init__(self, text_id, name, type, tooltip, selector, length, menu=None,
                  min=None, max=None, step=None, step_big=None, default=None, readonly=False,
                  gesture_bit=None, func_bit=None, format_value=None, scale_class=None,
-                 reopener=False):
+                 reopener=False, zeroer=False):
         super().__init__(text_id, name, type, tooltip=tooltip, menu=menu or [],
                          min=min, max=max, step=step, step_big=step_big, default=default,
                          readonly=readonly, format_value=format_value, scale_class=scale_class,
-                         reopener=reopener)
+                         reopener=reopener, zeroer=zeroer)
         self.selector = selector
         self.length = length
         self.gesture_bit = gesture_bit
@@ -2282,6 +2298,47 @@ class Insta360Ctrls:
                 INSTA360_FUNC_STATUS_SELECTOR,
                 INSTA360_FUNC_STATUS_LENGTH,
                 func_bit=INSTA360_FUNC_BIT_SMART_COMPOSITION,
+            ),
+            Insta360Ctrl(
+                'insta360_pan_speed',
+                'Pan Speed',
+                'integer',
+                'Drive the gimbal left or right continuously. Snaps back to zero, which stops it',
+                INSTA360_PANTILT_RELATIVE_SELECTOR,
+                INSTA360_PANTILT_RELATIVE_LENGTH,
+                min=-INSTA360_PANTILT_SPEED_MAX,
+                max=INSTA360_PANTILT_SPEED_MAX,
+                step=1,
+                default=0,
+                zeroer=True,
+            ),
+            Insta360Ctrl(
+                'insta360_tilt_speed',
+                'Tilt Speed',
+                'integer',
+                'Drive the gimbal up or down continuously. Snaps back to zero, which stops it',
+                INSTA360_PANTILT_RELATIVE_SELECTOR,
+                INSTA360_PANTILT_RELATIVE_LENGTH,
+                min=-INSTA360_PANTILT_SPEED_MAX,
+                max=INSTA360_PANTILT_SPEED_MAX,
+                step=1,
+                default=0,
+                zeroer=True,
+            ),
+            Insta360Ctrl(
+                'insta360_video_mode',
+                'Video Mode',
+                'menu',
+                'Whiteboard needs its markers in view and DeskView needs the camera tilted '
+                'forward, so the camera refuses those unless the scene suits',
+                INSTA360_VIDEO_MODE_SELECTOR,
+                INSTA360_VIDEO_MODE_LENGTH,
+                menu=[
+                    BaseCtrlMenu('normal', 'Normal', INSTA360_VIDEO_MODE_NORMAL),
+                    BaseCtrlMenu('whiteboard', 'Whiteboard', INSTA360_VIDEO_MODE_WHITEBOARD),
+                    BaseCtrlMenu('overhead', 'Overhead', INSTA360_VIDEO_MODE_OVERHEAD),
+                    BaseCtrlMenu('deskview', 'DeskView', INSTA360_VIDEO_MODE_DESKVIEW),
+                ],
             ),
             Insta360Ctrl(
                 'insta360_high_framerate',
@@ -2452,6 +2509,13 @@ class Insta360Ctrls:
                 continue
 
             buf = self.read(c.selector, c.length)
+            if c.text_id in ('insta360_pan_speed', 'insta360_tilt_speed'):
+                c.value = 0
+                continue
+            if c.text_id == 'insta360_video_mode':
+                valmenu = find_by_value(c.menu, buf[0])
+                c.value = valmenu.text_id if valmenu else str(buf[0])
+                continue
             if c.text_id in ('insta360_track_speed', 'insta360_composition'):
                 speed_val = buf[0]
                 valmenu = find_by_value(c.menu, speed_val)
@@ -2521,10 +2585,19 @@ class Insta360Ctrls:
                     collect_warning(f'Insta360Ctrls: can\'t find {v} in {[c.text_id for c in ctrl.menu]}', errs)
                     continue
 
-                self.write(ctrl.selector, menu.value.to_bytes(ctrl.length, byteorder='little'))
+                if ctrl.text_id == 'insta360_video_mode':
+                    # the mode id rides in byte 0, the rest of the struct stays as it is
+                    payload = bytearray(self.read(ctrl.selector, ctrl.length))
+                    payload[0] = menu.value
+                    self.write(ctrl.selector, bytes(payload))
+                else:
+                    self.write(ctrl.selector, menu.value.to_bytes(ctrl.length, byteorder='little'))
                 ctrl.value = v
             elif ctrl.type == 'integer':
-                if ctrl.text_id == 'insta360_shutter':
+                if ctrl.text_id in ('insta360_pan_speed', 'insta360_tilt_speed'):
+                    self.write_pantilt_speed(ctrl.text_id, int(v))
+                    ctrl.value = 0
+                elif ctrl.text_id == 'insta360_shutter':
                     idx = int(v)
                     if idx < 0 or idx >= len(INSTA360_SHUTTER_PRESETS):
                         collect_warning(f'Insta360Ctrls: shutter index {idx} out of range', errs)
@@ -2553,6 +2626,24 @@ class Insta360Ctrls:
 
         if func_mask != func_mask_orig:
             self.write(INSTA360_FUNC_STATUS_SELECTOR, func_mask.to_bytes(INSTA360_FUNC_STATUS_LENGTH, byteorder='little'))
+
+    # both axes share one 4 byte register, so a change to either rewrites the pair
+    def write_pantilt_speed(self, text_id, value):
+        other = ('insta360_tilt_speed' if text_id == 'insta360_pan_speed'
+                 else 'insta360_pan_speed')
+        other_ctrl = find_by_text_id(self.ctrls, other)
+        speeds = {text_id: value, other: (other_ctrl.value or 0) if other_ctrl else 0}
+        payload = bytearray()
+        for axis in ('insta360_pan_speed', 'insta360_tilt_speed'):
+            speed = max(-INSTA360_PANTILT_SPEED_MAX,
+                        min(INSTA360_PANTILT_SPEED_MAX, int(speeds.get(axis, 0))))
+            if speed > 0:
+                payload += bytes([0x01, speed])
+            elif speed < 0:
+                payload += bytes([0xff, -speed])
+            else:
+                payload += bytes([0x00, 0x01])      # the vendor app's idle encoding
+        self.write(INSTA360_PANTILT_RELATIVE_SELECTOR, bytes(payload))
 
     def get_ctrls(self):
         return self.ctrls
@@ -3672,6 +3763,9 @@ class CameraCtrls:
                         'ankerwork_hor_flip',
                         'insta360_track_speed',
                         'insta360_composition',
+                        'insta360_video_mode',
+                        'insta360_pan_speed',
+                        'insta360_tilt_speed',
                         'insta360_auto_tracking',
                         'insta360_smart_composition',
                         'insta360_single_tap_tracking',
