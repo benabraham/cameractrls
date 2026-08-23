@@ -2165,7 +2165,10 @@ INSTA360_FUNC_STATUS_BIT_GESTURE_ALL = 0x10
 # see src/insta360.md. The bits sit in the same 0x1b word as the gesture master switch.
 INSTA360_FUNC_BIT_SMART_COMPOSITION = 0x0001
 INSTA360_FUNC_BIT_HDR = 0x0004
+INSTA360_FUNC_BIT_ROLL_ADJUST = 0x0080
 INSTA360_FUNC_BIT_AUTO_TRACKING = 0x0100
+INSTA360_FUNC_BIT_SINGLE_TAP_TRACKING = 0x0400
+INSTA360_FUNC_BIT_PRIVACY_MODE = 0x0800
 
 ## Manual exposure, gen 1 Link only
 ## XU_AE_MODE_CONTROL 0x1E, XU_ISO_CONTROL 0x19, XU_EXPOSURE_TIME_ABSOLUTE_CONTROL 0x1D
@@ -2276,6 +2279,34 @@ class Insta360Ctrls:
                 INSTA360_FUNC_STATUS_SELECTOR,
                 INSTA360_FUNC_STATUS_LENGTH,
                 func_bit=INSTA360_FUNC_BIT_SMART_COMPOSITION,
+            ),
+            Insta360Ctrl(
+                'insta360_single_tap_tracking',
+                'Single Tap Tracking',
+                'boolean',
+                'Track whoever is tapped, instead of following automatically',
+                INSTA360_FUNC_STATUS_SELECTOR,
+                INSTA360_FUNC_STATUS_LENGTH,
+                func_bit=INSTA360_FUNC_BIT_SINGLE_TAP_TRACKING,
+            ),
+            Insta360Ctrl(
+                'insta360_horizontal_correction',
+                'Horizontal Correction',
+                'boolean',
+                'Keep the horizon level automatically',
+                INSTA360_FUNC_STATUS_SELECTOR,
+                INSTA360_FUNC_STATUS_LENGTH,
+                func_bit=INSTA360_FUNC_BIT_ROLL_ADJUST,
+            ),
+            Insta360Ctrl(
+                'insta360_privacy_mode',
+                'Privacy Mode',
+                'boolean',
+                'Point the gimbal down and stop capturing. On this camera the lens physically '
+                'tilts 90 degrees, lift it or turn this off to resume',
+                INSTA360_FUNC_STATUS_SELECTOR,
+                INSTA360_FUNC_STATUS_LENGTH,
+                func_bit=INSTA360_FUNC_BIT_PRIVACY_MODE,
             ),
             Insta360Ctrl(
                 'insta360_composition',
@@ -3629,6 +3660,8 @@ class CameraCtrls:
                         'insta360_composition',
                         'insta360_auto_tracking',
                         'insta360_smart_composition',
+                        'insta360_single_tap_tracking',
+                        'insta360_horizontal_correction',
                     ]) +
                     pop_list_by_ids(ctrls, [
                         V4L2_CID_ZOOM_ABSOLUTE,
@@ -3729,7 +3762,8 @@ class CameraCtrls:
             ]),
             CtrlPage('Advanced', [
                 CtrlCategory('Power Line', pop_list_by_ids(ctrls, [V4L2_CID_POWER_LINE_FREQUENCY])),
-                CtrlCategory('Privacy', pop_list_by_ids(ctrls, [V4L2_CID_PRIVACY])),
+                CtrlCategory('Privacy', pop_list_by_ids(ctrls, [V4L2_CID_PRIVACY]) +
+                    pop_list_by_text_ids(ctrls, ['insta360_privacy_mode'])),
                 CtrlCategory('Rotate/Flip', pop_list_by_ids(ctrls, [V4L2_CID_ROTATE, V4L2_CID_HFLIP, V4L2_CID_VFLIP])),
                 CtrlCategory('Image Source Control', pop_list_by_base_id(ctrls, V4L2_CID_IMAGE_SOURCE_CLASS_BASE)),
                 CtrlCategory('Image Process Control', pop_list_by_base_id(ctrls, V4L2_CID_IMAGE_PROC_CLASS_BASE)),
