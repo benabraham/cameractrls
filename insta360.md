@@ -700,63 +700,65 @@ Source: the 8 screenshots of Insta360 Link Controller taken 2025-12-10 on this c
 
 | UI control | Mapped | How |
 |---|---|---|
-| View Adjustment — pan / tilt d-pad | ✅ | V4L2 `pan_absolute` / `tilt_absolute`, also XU 0x1a |
-| View Adjustment — zoom in / out, shows 1.2x | ✅ | V4L2 `zoom_absolute`, 100-400 |
-| Presets (+) | ❌ | unit 10 selectors 0x03-0x05 suspected, all read zero. cameractrls has its own host-side preset system, which is not the same thing |
-| Smart Composition toggle | ❌ | separate from the framing choice below |
-| Composition — Head / Half Body / Whole Body | ✅ | XU 0x13, `insta360_composition`. Direction confirmed with a person in frame, effect weak at distance |
-| Tracking Speed — Quick / Ordinary / Slow | ✅ | XU 0x12, `insta360_track_speed`, 1 slow 2 medium 3 fast, confirmed blind |
-| Enable Auto Tracking | ❌ | reachable in practice by firing the palm gesture, but no direct control |
+| Pan / tilt d-pad | ✅ | V4L2 `pan_absolute` / `tilt_absolute`, XU 0x1a |
+| **Pan / tilt continuous** | ✅ | **XU 0x16, `insta360_pan_speed` / `insta360_tilt_speed`** |
+| Zoom | ✅ | V4L2 `zoom_absolute`, the app uses the same UVC control |
+| Presets | ❌ | unit 10 selectors 0x03-0x05 suspected, all read zero |
+| Smart Composition | ✅ | XU 0x1b bit 0x0001 |
+| Composition Head / Half / Whole | ✅ | XU 0x13 |
+| Tracking Speed | ✅ | XU 0x12 |
+| Enable Auto Tracking | ✅ | XU 0x1b bit 0x0100 |
+| Single Tap Tracking | ✅ | XU 0x1b bit 0x0400 |
 
 ### Effects tab
 
 | UI control | Mapped | How |
 |---|---|---|
-| Exposure Auto / M | ✅ | XU 0x1e, `insta360_exposure_mode` |
-| Exposure Compensation, ±3.0 EV | ✅ | XU 0x09, `insta360_exposure_bias`, 0.01 EV per unit, ±300 |
-| ISO, 100-3200 | ✅ | XU 0x19, `insta360_iso` |
-| Shutter, 1/30 - 1/8000 | ✅ | XU 0x1d, `insta360_shutter`, denominator |
-| Exposure curve, editable + reset | ⚠️ | XU 0x10 reads the 127-point LUT, **writes revert**. The app keeps its curve host-side |
-| Auto Focus Auto / M + value | ✅ | V4L2 `focus_automatic_continuous` / `focus_absolute` |
-| Temperature Auto / M, 2000-10000K | ✅ | V4L2 `white_balance_automatic` / `white_balance_temperature` |
-| Brightness / Contrast / Saturation / Sharpness | ✅ | V4L2 |
-| HDR | ❌ | **the one real gap.** Not an AE mode, not a low 0x1b bit, no selector of its own |
-| Anti-Flicker | ⚠️ | V4L2 `power_line_frequency` covers the same ground, but is not the app's control |
-| Set as startup | ❌ | `supportSetStartupParamsToCamera` says this is camera-side, selector unknown |
-| Color section reset (⟲) | ❌ | the app's `resetImageSettings`. Setting each control to its default is not identical |
+| Exposure Auto / M | ✅ | XU 0x1e |
+| Exposure Compensation | ✅ | XU 0x09, 0.01 EV per unit |
+| ISO | ✅ | XU 0x19 |
+| Shutter | ✅ | XU 0x1d, denominator |
+| Exposure curve | ✅ | XU 0x10, five presets. Not readable back |
+| Auto Focus, Temperature, Brightness, Contrast, Saturation, Sharpness | ✅ | V4L2 |
+| **HDR** | ✅ | **XU 0x1b bit 0x0004** |
+| Anti-Flicker | ✅ | V4L2 `power_line_frequency`, same control the app drives |
+| Set as startup | ❌ | camera-side per the capability flags, selector unknown |
+| Color section reset | ❌ | the app's own `resetImageSettings` |
 
 ### More tab
 
 | UI control | Mapped | How |
 |---|---|---|
-| Gesture master switch | ✅ | XU 0x1b bit 0x10 |
-| Gesture — AI Tracking (palm) | ✅ | XU 0x05 bit 0x02, **verified by A/B** |
-| Gesture — Zoom (L) | ⚠️ | XU 0x05 bit 0x04, exposed and believed correct, never isolated in a test |
-| Gesture — Whiteboard (V) | ⚠️ | XU 0x05 bit 0x08, same |
-| Horizontal Flip | ❌ | `setMirrorChecked`. This camera exposes no V4L2 hflip |
-| Smart Adjustment | ❌ | `setSmartAdjustmentChecked` |
-| Horizontal fine-tuning + reset | ⚠️ | XU 0x18 XU_BIAS is the candidate. Writes are accepted and echoed, no measurable effect on pan/tilt or the frame |
-| Portrait Resolution and High Frame rate | ❌ | `setLowResolution` / `setForcedVertical`, would re-enumerate formats |
+| Gesture master switch | ✅ | XU 0x1b bit 0x0010 |
+| Gesture palm / L / V | ✅ | XU 0x05 bits 0x02 / 0x04 / 0x08 |
+| Horizontal fine-tuning | ❌ | no bus traffic when driven, likely host-side |
+| Horizontal Correction | ✅ | XU 0x1b bit 0x0080 |
+| Smart Adjustment | ❌ | no bus traffic |
+| Privacy Mode | ✅ | XU 0x1b bit 0x0800 |
+| **Portrait Resolution and High Frame rate** | ✅ | **XU 0x1b bit 0x0020**, unlocks 50/60 fps and portrait |
 
 ### Bottom bar
 
 | UI control | Mapped | How |
 |---|---|---|
-| AI Tracking mode | ❌ | 0x02 XU_VIDEO_MODE_CONTROL, 52 bytes, unexplored |
-| Whiteboard mode | ❌ | same |
-| Overhead mode | ❌ | same |
-| DeskView mode | ❌ | same |
-| Resolution / format selector (1080p30) | ✅ | V4L2, `pixelformat` / `resolution` / `fps` |
-| Snapshot | ⚠️ | any capture tool does this host-side. The camera's own XU_TAKE_PICTURE 0x0a is unmapped |
-| Record | ✅ | host-side, any recorder |
-| Device switching | — | host-side app concept, not a camera feature |
+| **AI Tracking / Whiteboard / Overhead / DeskView** | ✅ | **XU 0x02 byte 0: 0, 4, 5, 6** |
+| Resolution / format | ✅ | V4L2 |
+| Snapshot / Record | ✅ | host-side, any capture tool |
 
 ### Score
 
-**19 of 33 controls usable from Linux**, 6 partly, 8 not at all. Everything in the Exposure
-group is now covered except HDR and the curve. The unmapped cluster is the AI/video-mode
-family — the four bottom-bar modes, Smart Composition, Auto Tracking — which all likely live
-in the same unexplored 52-byte 0x02 struct, plus the mirror/compatibility toggles.
+**29 of 33 controls usable from Linux.** What is left, and why:
+
+- **Presets** — the app's save/recall slots. Unit 10 selectors 0x03-0x05 read as zeros and
+  were never driven; cameractrls has its own host-side preset system, which covers the need
+  differently.
+- **Horizontal fine-tuning** and **Smart Adjustment** — driving both over the vendor's own
+  remote produced **zero** bus traffic, so the app applies them host-side. Not reachable
+  through the camera at all.
+- **Set as startup** and the **Color reset button** — app-level conveniences.
+
+Linux also gained one thing the Windows app cannot do: `insta360-ws.py` can drive any of the
+61 parameters programmatically, and `usbmon-bin.py` shows exactly what each one sends.
 
 ## 📋 WINDOWS FEATURES TO MAP## 📋 WINDOWS FEATURES TO MAP
 
