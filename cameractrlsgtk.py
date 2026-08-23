@@ -358,10 +358,10 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
                         if c.text_id == 'zoom_absolute':
                             self.zoom_absolute_sc = scale
 
-                        if c.text_id == 'pan_speed':
+                        if c.text_id in ('pan_speed', 'insta360_pan_speed'):
                             self.pan_speed_sc = scale
 
-                        if c.text_id == 'tilt_speed':
+                        if c.text_id in ('tilt_speed', 'insta360_tilt_speed'):
                             self.tilt_speed_sc = scale
 
                         if c.text_id == 'pan_absolute':

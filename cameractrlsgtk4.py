@@ -356,10 +356,10 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
                         if c.text_id == 'zoom_absolute':
                             self.zoom_absolute_sc = scale
 
-                        if c.text_id == 'pan_speed':
+                        if c.text_id in ('pan_speed', 'insta360_pan_speed'):
                             self.pan_speed_sc = scale
 
-                        if c.text_id == 'tilt_speed':
+                        if c.text_id in ('tilt_speed', 'insta360_tilt_speed'):
                             self.tilt_speed_sc = scale
 
                         if c.text_id == 'pan_absolute':
@@ -546,6 +546,9 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
         self.update_ctrl_state(c)
 
     def handle_ptz_speed_key_pressed(self, c, keyval, keycode, state):
+        # a camera can expose one axis without the other, or neither
+        if self.pan_speed_sc is None or self.tilt_speed_sc is None:
+            return False
         pan_lower = self.pan_speed_sc.get_adjustment().get_lower()
         pan_upper =self.pan_speed_sc.get_adjustment().get_upper()
         tilt_lower = self.tilt_speed_sc.get_adjustment().get_lower()
