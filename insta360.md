@@ -6,6 +6,25 @@
 - **Firmware**: v1.4.5.8_build1
 - **Serial**: 13B586099180472
 
+## 🔌 THE CAMERA VANISHES WHEN THE MONITOR IS OFF
+
+On this machine the camera hangs off a USB hub inside the monitor, so **switching the
+monitor off unpowers the hub and the camera leaves the bus entirely**. Every hub in the
+chain disappears with it:
+
+    2109:2817 VIA hub, 05e3:0610 Genesys, 2109:8883 billboard, 2109:0817, 05e3:0625
+
+It looks exactly like a camera fault, and it was misdiagnosed twice in one day. Tell them
+apart before blaming firmware:
+
+- `lsusb -d 2e1a:4c01` empty **and** the hubs above also missing → the monitor is off.
+  Nothing to fix, power it back on.
+- Camera missing but the hubs still present → a real device problem, usually a
+  re-enumeration after writing 0x1b bit 0x20, which resolves itself.
+- Camera present but `/dev/video0` missing, interfaces bound to `usbfs` → a VM passthrough
+  detach that did not restore the driver. Replug, or
+  `echo 3-1.4 | sudo tee /sys/bus/usb/drivers/usb/unbind` then the same to `bind`.
+
 ## ⚠️ XU writes only stick while the camera is streaming
 
 Reported in [cameractrls issue #55](https://github.com/soyersoyer/cameractrls/issues/55)
