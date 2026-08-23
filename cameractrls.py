@@ -2148,6 +2148,22 @@ INSTA360_TRACK_SPEED_SLOW = 1
 INSTA360_TRACK_SPEED_MEDIUM = 2
 INSTA360_TRACK_SPEED_FAST = 3
 
+## Exposure curve (XU_EXPOSURE_CURVE_CONTROL, selector 0x10, 255 bytes)
+## A 256 point, 10 bit tone curve sent in three chunks: byte 0 is the start index, the first
+## u16 is 2 while more chunks follow and 1 on the last, then up to 126 u16 LE points.
+## GET_CUR only ever returns the chunk written last, so the curve cannot be read back.
+INSTA360_EXPOSURE_CURVE_SELECTOR = 0x10
+INSTA360_EXPOSURE_CURVE_LENGTH = 255
+INSTA360_EXPOSURE_CURVE_POINTS = 256
+INSTA360_EXPOSURE_CURVE_MAX = 1023
+
+def insta360_curve_points(gamma):
+    top = INSTA360_EXPOSURE_CURVE_MAX
+    last = INSTA360_EXPOSURE_CURVE_POINTS - 1
+    if gamma == 1.0:
+        return [min(top, i * 4) for i in range(INSTA360_EXPOSURE_CURVE_POINTS)]
+    return [min(top, int(top * ((i / last) ** gamma))) for i in range(INSTA360_EXPOSURE_CURVE_POINTS)]
+
 ## Gimbal speed (XU_PANTILT_RELATIVE_CONTROL, selector 0x16, 4 bytes)
 ## [pan sign, pan magnitude, tilt sign, tilt magnitude], sign 0x01 up/right, 0xff down/left,
 ## 0x00 with magnitude 1 is the idle state the vendor app sends to stop.
@@ -2219,11 +2235,11 @@ class Insta360Ctrl(BaseCtrl):
     def __init__(self, text_id, name, type, tooltip, selector, length, menu=None,
                  min=None, max=None, step=None, step_big=None, default=None, readonly=False,
                  gesture_bit=None, func_bit=None, format_value=None, scale_class=None,
-                 reopener=False, zeroer=False):
+                 reopener=False, zeroer=False, unrestorable=False):
         super().__init__(text_id, name, type, tooltip=tooltip, menu=menu or [],
                          min=min, max=max, step=step, step_big=step_big, default=default,
                          readonly=readonly, format_value=format_value, scale_class=scale_class,
-                         reopener=reopener, zeroer=zeroer)
+                         reopener=reopener, zeroer=zeroer, unrestorable=unrestorable)
         self.selector = selector
         self.length = length
         self.gesture_bit = gesture_bit
@@ -2298,6 +2314,24 @@ class Insta360Ctrls:
                 INSTA360_FUNC_STATUS_SELECTOR,
                 INSTA360_FUNC_STATUS_LENGTH,
                 func_bit=INSTA360_FUNC_BIT_SMART_COMPOSITION,
+            ),
+            Insta360Ctrl(
+                'insta360_exposure_curve',
+                'Exposure Curve',
+                'menu',
+                'Tone curve applied by the camera. It cannot be read back, so this always '
+                'starts at linear whatever was last loaded',
+                INSTA360_EXPOSURE_CURVE_SELECTOR,
+                INSTA360_EXPOSURE_CURVE_LENGTH,
+                menu=[
+                    BaseCtrlMenu('linear', 'Linear', 1.0),
+                    BaseCtrlMenu('lift_shadows', 'Lift Shadows', 0.7),
+                    BaseCtrlMenu('bright', 'Bright', 0.5),
+                    BaseCtrlMenu('deepen', 'Deepen', 1.5),
+                    BaseCtrlMenu('contrast', 'Contrast', 2.2),
+                ],
+                default='linear',
+                unrestorable=True,
             ),
             Insta360Ctrl(
                 'insta360_pan_speed',
@@ -2512,6 +2546,9 @@ class Insta360Ctrls:
             if c.text_id in ('insta360_pan_speed', 'insta360_tilt_speed'):
                 c.value = 0
                 continue
+            if c.text_id == 'insta360_exposure_curve':
+                c.value = 'linear'      # the device only echoes the last chunk written
+                continue
             if c.text_id == 'insta360_video_mode':
                 valmenu = find_by_value(c.menu, buf[0])
                 c.value = valmenu.text_id if valmenu else str(buf[0])
@@ -2585,7 +2622,9 @@ class Insta360Ctrls:
                     collect_warning(f'Insta360Ctrls: can\'t find {v} in {[c.text_id for c in ctrl.menu]}', errs)
                     continue
 
-                if ctrl.text_id == 'insta360_video_mode':
+                if ctrl.text_id == 'insta360_exposure_curve':
+                    self.write_exposure_curve(insta360_curve_points(menu.value))
+                elif ctrl.text_id == 'insta360_video_mode':
                     # the mode id rides in byte 0, the rest of the struct stays as it is
                     payload = bytearray(self.read(ctrl.selector, ctrl.length))
                     payload[0] = menu.value
@@ -2626,6 +2665,20 @@ class Insta360Ctrls:
 
         if func_mask != func_mask_orig:
             self.write(INSTA360_FUNC_STATUS_SELECTOR, func_mask.to_bytes(INSTA360_FUNC_STATUS_LENGTH, byteorder='little'))
+
+    def write_exposure_curve(self, points):
+        chunk = (INSTA360_EXPOSURE_CURVE_LENGTH - 3) // 2      # 126 points per write
+        starts = list(range(0, INSTA360_EXPOSURE_CURVE_POINTS, chunk))
+        for n, start in enumerate(starts):
+            part = points[start:start + chunk]
+            more = 2 if n < len(starts) - 1 else 1
+            body = int.to_bytes(more, 2, 'little')
+            for value in part:
+                body += int.to_bytes(min(INSTA360_EXPOSURE_CURVE_MAX, max(0, value)), 2, 'little')
+            payload = bytes([start & 0xff]) + body
+            self.write(INSTA360_EXPOSURE_CURVE_SELECTOR,
+                       payload[:INSTA360_EXPOSURE_CURVE_LENGTH].ljust(
+                           INSTA360_EXPOSURE_CURVE_LENGTH, b'\x00'))
 
     # both axes share one 4 byte register, so a change to either rewrites the pair
     def write_pantilt_speed(self, text_id, value):
@@ -3839,6 +3892,7 @@ class CameraCtrls:
                         'ankerwork_face_compensation_enable',
                         'ankerwork_face_compensation_value',
                         'insta360_hdr',
+                        'insta360_exposure_curve',
                         'insta360_exposure_bias',
                     ])
                 ),

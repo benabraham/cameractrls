@@ -336,6 +336,73 @@ smart adjustment, fine tuning, `gesture_rock_switch`, `gesture_ok_switch`, `lowe
 Either the app handles them host-side, or the gen 1 Link does not implement them — the two
 extra gestures are most likely Link 2 features.
 
+## 🕹️ GIMBAL SPEED, VIDEO MODES AND THE CURVE (2026-08-23)
+
+Captured with `usbmon-bin.py` while the user drove the vendor app's own controls, so these
+are full payloads rather than the 32 byte truncations the text interface gives.
+
+### 0x16 XU_PANTILT_RELATIVE — continuous gimbal movement ✅
+
+Four bytes, `[pan sign, pan magnitude, tilt sign, tilt magnitude]`:
+
+| Captured | Meaning |
+|---|---|
+| `ff 08 00 01` | pan left, magnitude 8 |
+| `01 04 00 01` | pan right, magnitude 4 |
+| `00 01 ff 08` | tilt down, magnitude 8 |
+| `00 01 01 08` | tilt up, magnitude 8 |
+| `00 01 00 01` | **stop** — the app's idle encoding, magnitude 1 with sign 0 |
+
+Sign `0x01` is right/up, `0xff` is left/down. Magnitudes up to 30 were seen. Verified on the
+device: a 2 second burst at magnitude 8 swung the gimbal about 40°, and driving the opposite
+sign brought it back.
+
+**This is the gap the old notes flagged since day one.** The V4L2 `pan_speed` and `tilt_speed`
+controls exist on this camera but return EIO, so continuous movement was impossible from
+Linux. Exposed as `insta360_pan_speed` / `insta360_tilt_speed`, flagged `zeroer` so letting go
+stops the gimbal.
+
+Note the field order in 0x1a: the **second** int32 is pan, the first is tilt, confirmed by
+matching against V4L2 `pan_absolute`.
+
+### 0x02 XU_VIDEO_MODE — the four bottom-bar modes ✅
+
+The mode id rides in byte 0 of the 52 byte struct. Clicking through the app's buttons twice:
+
+| Id | Mode |
+|---|---|
+| 0 | normal, also written when leaving any mode |
+| 4 | Whiteboard |
+| 5 | Overhead |
+| 6 | DeskView |
+
+Id 1 appeared once, unidentified. This matches an earlier native probe where 5 was the only
+id to visibly transform the image — Overhead points the camera at the desk. Whiteboard and
+DeskView refuse unless the scene suits, which the app's own error strings confirm.
+
+### 0x10 XU_EXPOSURE_CURVE — chunked, and it does work ✅
+
+Every single-shot write was rejected because the curve arrives in **three chunks**:
+
+    byte 0      start index: 0, then 126, then 252
+    u16[0]      2 while more chunks follow, 1 on the last
+    u16[1..126] up to 126 curve points, 10 bit, little endian
+
+256 points spanning 0-1023. `GET_CUR` only ever returns the chunk written last, so the curve
+**cannot be read back** — the control is flagged `unrestorable` and always reports linear.
+
+Measured with a gamma 2.2 curve versus gamma 0.5, same scene:
+
+| Curve | mean | p5 | p95 |
+|---|---|---|---|
+| baseline | 131.5 | 43 | 197 |
+| gamma 2.2 | 128.5 | **31** | 198 |
+| gamma 0.5 | 139.8 | **47** | 197 |
+
+Shadows move, highlights hold — exactly what a tone curve should do. Offered as five
+presets rather than a 256 point editor. The vendor's own default is a linear ramp, and the
+three writes that produce it are in `xu3.txt` if it ever needs restoring byte for byte.
+
 ## 🎬 60 FPS AND PORTRAIT, UNLOCKED (2026-08-23)
 
 The app's Compatibility Settings checkbox writes **bit 0x0020 of 0x1b**, captured while the
@@ -809,7 +876,7 @@ recovered" below to redo it. ✅ = verified on this camera, gen 1, firmware v1.4
 | Sel | Official name | Len | RW | Meaning / value seen |
 |---|---|---|---|---|
 | 0x01 | XU_EXEC_SCRIPT_CONTROL | 4 | rw | zeros |
-| 0x02 | XU_VIDEO_MODE_CONTROL | 52 | rw | ✅ mode id in **byte 0** of a 32-byte write, captured from the vendor app. Tail holds pan, tilt, ?, zoom×100 |
+| 0x02 | XU_VIDEO_MODE_CONTROL | 52 | rw | ✅ mode id in **byte 0**: 0 normal, 4 whiteboard, 5 overhead, 6 deskview |
 | 0x03 | XU_DEVICE_INFO_CONTROL | 170 | rw | ✅ serial, a UUID, and **firmware `v1.4.5.8_build1`** as strings |
 | 0x04 | XU_PTZ_CMD_CONTROL | 262 | rw | zeros |
 | 0x05 | XU_GESTURE_STATUS_CONTROL | 1 | rw | ✅ gesture bitmask: palm 0x02, L 0x04, V 0x08 |
@@ -823,17 +890,17 @@ recovered" below to redo it. ✅ = verified on this camera, gen 1, firmware v1.4
 | 0x0d | XU_DEVICE_LICENSEN_CONTROL | 129 | rw | per-device blob, don't paste |
 | 0x0e | XU_DEVICE_PARAM_CONTROL | 1 | **wo** | write-only, GET_INFO says no read |
 | 0x0f | XU_DOWNLOAD_FILE / XU_AF_MODE | 12 | rw | aliased pair. Volatile |
-| 0x10 | XU_UPLOAD_FILE / XU_EXPOSURE_CURVE | 255 | rw* | ✅ **exposure curve LUT**: 127 × u16 LE at offset 1, identity ramp 0,0,4…500. Writes revert |
+| 0x10 | XU_UPLOAD_FILE / XU_EXPOSURE_CURVE | 255 | rw | ✅ **exposure curve**, 256 points sent in 3 chunks. Reads return only the last chunk |
 | 0x11 | XU_USB_MODE_SWITCH_CONTROL | 1 | rw | 0. **Do not write** — it can change how the device enumerates |
 | 0x12 | XU_TRACK_SPEED_CONTROL | 1 | rw | ✅ tracking speed, **1 slow, 2 medium, 3 fast**, confirmed by blind A/B. Vendor labels them Slow, Ordinary, Quick |
 | 0x13 | XU_LAYOUT_STYLE_CONTROL | 1 | rw | ✅ composition, **1 Head, 2 Half Body, 3 Whole Body**, 0 rejected. Direction confirmed with a person in frame, but the effect is weak at distance on this firmware |
 | 0x14 | XU_HEAD_LIST_CONTROL | 240 | ro | ✅ **detected head boxes as floats**. All-zero with nobody in frame, populated otherwise |
 | 0x15 | XU_TRACK_TARGET_CONTROL | 8 | rw | zeros |
-| 0x16 | XU_PANTILT_RELATIVE_CONTROL | 4 | rw | 768, 768 |
+| 0x16 | XU_PANTILT_RELATIVE_CONTROL | 4 | rw | ✅ **gimbal speed**, [pan sign, pan mag, tilt sign, tilt mag], stop is `00 01 00 01` |
 | 0x17 | XU_MOBVOI_PUBKEY_CONTROL | 129 | rw | per-device blob, don't paste |
 | 0x18 | XU_BIAS_CONTROL | 4 | rw | 48, 2643. Distinct from 0x09 — the ParamType enum groups PARAM_BIAS with the PTZ family, so this is likely the horizontal fine-tuning |
 | 0x19 | XU_ISO_CONTROL | 2 | rw | ✅ **ISO**. 100 → luminance 3.8, 400 → 10.2, 1600 → 26.4, 3200 → 40.5 |
-| 0x1a | XU_PANTILT_ABSOLUTE_CONTROL | 8 | rw | ✅ 2 × int32 LE in arc-seconds, matches the V4L2 pan/tilt |
+| 0x1a | XU_PANTILT_ABSOLUTE_CONTROL | 8 | rw | ✅ 2 × int32 LE arc-seconds, **tilt first, then pan** |
 | 0x1b | XU_FUNC_ENABLE_CONTROL | 2 | rw | ✅ function bitmask: **0x01** smart composition, **0x04** HDR, **0x10** gestures, **0x20** portrait/high frame rate (re-enumerates), **0x80** horizontal correction, **0x100** AI tracking, **0x400** single tap tracking, **0x800** privacy mode |
 | 0x1c | XU_VIDEO_RES_CONTROL | 10 | rw | mirrors the active stream format, zeros while idle |
 | 0x1d | XU_EXPOSURE_TIME_ABSOLUTE_CONTROL | 2 | rw | ✅ **shutter as denominator**, 60 = 1/60s. 1/30 → 85.0, 1/120 → 38.4, 1/1000 → 14.9, 1/8000 → 8.2. Firmware quantises: 30 reads back 29 |
