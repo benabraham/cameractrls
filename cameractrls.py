@@ -2165,6 +2165,7 @@ INSTA360_FUNC_STATUS_BIT_GESTURE_ALL = 0x10
 # see src/insta360.md. The bits sit in the same 0x1b word as the gesture master switch.
 INSTA360_FUNC_BIT_SMART_COMPOSITION = 0x0001
 INSTA360_FUNC_BIT_HDR = 0x0004
+INSTA360_FUNC_BIT_HIGH_FRAMERATE = 0x0020
 INSTA360_FUNC_BIT_ROLL_ADJUST = 0x0080
 INSTA360_FUNC_BIT_AUTO_TRACKING = 0x0100
 INSTA360_FUNC_BIT_SINGLE_TAP_TRACKING = 0x0400
@@ -2201,10 +2202,12 @@ def insta360_shutter_format(scale, value):
 class Insta360Ctrl(BaseCtrl):
     def __init__(self, text_id, name, type, tooltip, selector, length, menu=None,
                  min=None, max=None, step=None, step_big=None, default=None, readonly=False,
-                 gesture_bit=None, func_bit=None, format_value=None, scale_class=None):
+                 gesture_bit=None, func_bit=None, format_value=None, scale_class=None,
+                 reopener=False):
         super().__init__(text_id, name, type, tooltip=tooltip, menu=menu or [],
                          min=min, max=max, step=step, step_big=step_big, default=default,
-                         readonly=readonly, format_value=format_value, scale_class=scale_class)
+                         readonly=readonly, format_value=format_value, scale_class=scale_class,
+                         reopener=reopener)
         self.selector = selector
         self.length = length
         self.gesture_bit = gesture_bit
@@ -2279,6 +2282,17 @@ class Insta360Ctrls:
                 INSTA360_FUNC_STATUS_SELECTOR,
                 INSTA360_FUNC_STATUS_LENGTH,
                 func_bit=INSTA360_FUNC_BIT_SMART_COMPOSITION,
+            ),
+            Insta360Ctrl(
+                'insta360_high_framerate',
+                'Portrait and High Frame Rate',
+                'boolean',
+                'Offer 50 and 60 fps and the portrait resolutions. The camera re-enumerates '
+                'on this one, so anything already capturing will lose the device',
+                INSTA360_FUNC_STATUS_SELECTOR,
+                INSTA360_FUNC_STATUS_LENGTH,
+                func_bit=INSTA360_FUNC_BIT_HIGH_FRAMERATE,
+                reopener=True,
             ),
             Insta360Ctrl(
                 'insta360_single_tap_tracking',
@@ -3774,7 +3788,7 @@ class CameraCtrls:
                 CtrlCategory('JPEG', pop_list_by_base_id(ctrls, V4L2_CID_JPEG_CLASS_BASE)),
             ]),
             CtrlPage('Capture', [
-                CtrlCategory('Capture', pop_list_by_text_ids(ctrls, ['pixelformat', 'resolution', 'fps'])),
+                CtrlCategory('Capture', pop_list_by_text_ids(ctrls, ['pixelformat', 'resolution', 'fps', 'insta360_high_framerate'])),
                 CtrlCategory('Info', pop_list_by_text_ids(ctrls, ['card', 'driver', 'path', 'real_path', 'insta360_serial'])),
             ]),
             CtrlPage('Settings', [

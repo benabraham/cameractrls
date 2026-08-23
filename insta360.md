@@ -336,6 +336,33 @@ smart adjustment, fine tuning, `gesture_rock_switch`, `gesture_ok_switch`, `lowe
 Either the app handles them host-side, or the gen 1 Link does not implement them — the two
 extra gestures are most likely Link 2 features.
 
+## 🎬 60 FPS AND PORTRAIT, UNLOCKED (2026-08-23)
+
+The app's Compatibility Settings checkbox writes **bit 0x0020 of 0x1b**, captured while the
+user ticked it. Doing the same from Linux changes what the camera advertises:
+
+| | bit clear | bit set |
+|---|---|---|
+| MJPG / H264 1920x1080, 1920x1440, 1280x720, 1280x960 | 30, 25, 24 | **60, 50**, 30, 25, 24 |
+| MJPG / H264 3840x2160 | 30, 25, 24 | 30, 25, 24 (unchanged) |
+| **1080x1920, 1088x1920, 736x1280** portrait | absent | **60, 50, 30, 25, 24** |
+
+Ten format combinations become sixteen, and every non-4K mode gains 50 and 60 fps. 4K stays
+at 30, which matches the app's own HDR note about 4K and 50/60fps being exclusive.
+
+Exposed as `insta360_high_framerate`, flagged `reopener` because the device re-enumerates —
+anything already capturing loses the handle. Clearing the bit restores the original list.
+
+### What else the checkbox capture showed
+
+- **0x10 XU_EXPOSURE_CURVE is writable after all.** The app sent three curve writes, the
+  first starting `00 02 00 00 00 04 00 08 00 0c ...`. Our own writes were rejected, so the
+  payload needs a header or a framing we got wrong — not a read-only register.
+- **0x04 XU_PTZ_CMD_CONTROL** takes a 32-byte command, seen as
+  `a5 d0 03 00 f1 32 00 ...` — the gimbal command channel, still unmapped.
+- Ticking the checkbox also drove unit 5 selector 0x05 (power line frequency) and three
+  short writes to 0x02, so the app reconfigures more than the one bit.
+
 ## 🗂️ THE COMPLETE FEATURE LIST, READ OUT OF THE APP
 
 `insta360-ws.py --dump-state` decodes the app's `DeviceInfoNotification`, which carries a
@@ -452,7 +479,14 @@ Monotonic, compressing at the top as the frame clips. ✅
 Roughly halves per stop across nine stops. Readback quantises only at the slow end,
 30 → 29 and 60 → 59, the rest are exact. ✅
 
-### ⚠️ 0x1b bit 0x20 disconnects the camera
+### 0x1b bit 0x20 — read as a crash, actually a feature (corrected 2026-08-23)
+
+**This section's original conclusion was wrong and is kept for the reasoning.** Bit 0x20 is
+the vendor app's "Portrait Resolution and High Frame rate" toggle. Setting it makes the
+camera **re-enumerate on the USB bus**, which is exactly what a device advertising a new
+descriptor set must do — the probe saw the disconnect and called it a crash. Writes issued
+while the device is re-enumerating fail with EPROTO, which looked like a bricked register.
+It round-trips cleanly from Linux in both directions. See the daylight section below.
 
 Sweeping the function bitmask one bit at a time:
 
@@ -800,7 +834,7 @@ recovered" below to redo it. ✅ = verified on this camera, gen 1, firmware v1.4
 | 0x18 | XU_BIAS_CONTROL | 4 | rw | 48, 2643. Distinct from 0x09 — the ParamType enum groups PARAM_BIAS with the PTZ family, so this is likely the horizontal fine-tuning |
 | 0x19 | XU_ISO_CONTROL | 2 | rw | ✅ **ISO**. 100 → luminance 3.8, 400 → 10.2, 1600 → 26.4, 3200 → 40.5 |
 | 0x1a | XU_PANTILT_ABSOLUTE_CONTROL | 8 | rw | ✅ 2 × int32 LE in arc-seconds, matches the V4L2 pan/tilt |
-| 0x1b | XU_FUNC_ENABLE_CONTROL | 2 | rw | ✅ function bitmask: **0x01 smart composition, 0x04 HDR, 0x10 gestures, 0x100 AI tracking**. **Never write bits ≥ 0x20, 0x20 drops the camera off the bus** |
+| 0x1b | XU_FUNC_ENABLE_CONTROL | 2 | rw | ✅ function bitmask: **0x01** smart composition, **0x04** HDR, **0x10** gestures, **0x20** portrait/high frame rate (re-enumerates), **0x80** horizontal correction, **0x100** AI tracking, **0x400** single tap tracking, **0x800** privacy mode |
 | 0x1c | XU_VIDEO_RES_CONTROL | 10 | rw | mirrors the active stream format, zeros while idle |
 | 0x1d | XU_EXPOSURE_TIME_ABSOLUTE_CONTROL | 2 | rw | ✅ **shutter as denominator**, 60 = 1/60s. 1/30 → 85.0, 1/120 → 38.4, 1/1000 → 14.9, 1/8000 → 8.2. Firmware quantises: 30 reads back 29 |
 | 0x1e | XU_AE_MODE_CONTROL | 1 | rw | ✅ exposure mode, 1 = manual, 2 = auto. 0 and 4 behave like auto, 3 and 5 are ~1 stop darker. None of them is HDR |
