@@ -82,22 +82,36 @@ ffmpeg -nostdin -loglevel error -f v4l2 -input_format mjpeg -video_size 1280x720
 ### Next steps, in order
 
 1. **Verify the three paths above**, then drop this list to whatever is left.
-2. **Upstream the cameractrls bugs separately.** Three fixes here are not Insta360 specific
-   and stand on their own: `to_bool()` on boolean params (inherited from PR #101, `hdr=0`
-   used to turn HDR *on*), and the PTZ arrow-key handler in both GUIs, which assumed both
-   speed sliders exist and bound only to controls literally named `pan_speed`.
-3. **Feed the findings back to upstream PR #101 / issue #55.** The PR has been open since
-   March 2026, covers only the Link 2, never places its gesture controls on a page so they
-   land in Advanced/Other, and its selector guesses are confirmed correct by this work on
-   different hardware. The protobuf extraction trick is the useful part for them.
-4. **Force-push `insta360`.** It was rebased onto upstream main, so `origin/insta360` has
+2. **One small upstream PR: the PTZ key handler guard.** This is the only fix here that is a
+   genuine upstream bug, verified against `upstream/main` (6f38825). `V4L2_CTRL_ZEROERS`
+   includes `ZOOM_CONTINUOUS`, the GUI attaches `handle_ptz_speed_key_pressed` to *any*
+   zeroer slider, and the handler unconditionally dereferences `self.pan_speed_sc`. A camera
+   with continuous zoom and no pan/tilt speed raises `AttributeError` on an arrow key.
+   Present in both GTK3 and GTK4. Nothing open upstream describes it — searches for
+   `zoom_continuous` and `AttributeError` return zero. Read issue #91 "ValueError with GTK
+   client" first in case it is the same crash reported vaguely.
+3. **Comment on PR #101, do not open a competing PR.** Two of the fixes on this branch are
+   *not* upstream bugs and must not be presented as such:
+   - the `to_bool()` fix belongs to **PR #101's own unmerged code** (`hdr=0` turned HDR on,
+     because the string `'0'` is truthy). It is theirs to fix; upstream `main` has no
+     Insta360 code at all.
+   - binding the key handler to `insta360_pan_speed` only matters because *we* added those
+     controls. It is not upstreamable on its own.
+
+   What is worth telling #101: their Link 2 selector guesses are **confirmed correct on gen 1
+   hardware**, their gesture controls are never placed on a `CtrlPage` so they fall through
+   to Advanced/Other, and the protobuf-enum extraction trick removes the guesswork entirely.
+4. **Expect upstream to be slow.** Five PRs are open, oldest from February 2026, none merged;
+   PR #101 has sat since March. PR #107 adds an HDR control for an Elgato Facecam — read how
+   they modelled it before proposing ours, since it is the same shape of problem.
+5. **Force-push `insta360`.** It was rebased onto upstream main, so `origin/insta360` has
    diverged. Backup ref: `insta360-pre-rebase-backup`.
-5. **Open leads**, all needing the Windows app in a VM plus a usbmon capture:
+6. **Open leads**, all needing the Windows app in a VM plus a usbmon capture:
    - presets, unit 10 selectors 0x03-0x05, currently reading zeros
    - `0x04 XU_PTZ_CMD`, a 262 byte command channel seen once as `a5 d0 03 00 f1 32 ...`
    - video mode id 1, observed once and unidentified
    - the ten `DeviceSettingInfo` fields (56-65) the app's own web client does not decode
-6. **Not reachable, stop looking.** Horizontal fine-tuning, smart adjustment, mirror H/V,
+7. **Not reachable, stop looking.** Horizontal fine-tuning, smart adjustment, mirror H/V,
    audio capture modes and the rock/OK gestures produce **zero** bus traffic when driven
    through the vendor's own protocol. The app does them host-side or the gen 1 firmware
    lacks them; `supportAudioCaptureMode` in the app's capability list confirms the latter.
