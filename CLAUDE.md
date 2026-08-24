@@ -116,15 +116,34 @@ ffmpeg -nostdin -loglevel error -f v4l2 -input_format mjpeg -video_size 1280x720
    through the vendor's own protocol. The app does them host-side or the gen 1 firmware
    lacks them; `supportAudioCaptureMode` in the app's capability list confirms the latter.
 
+### Where the evidence lives
+
+Everything needed to continue is in this repo. These sit outside it and are referenced:
+
+| Path | What | If it is gone |
+|---|---|---|
+| `../Screenshot 2025-12-10 2005*.png` | 8 shots of the Windows app UI, the source of the option inventory | originals also at `/mnt/winos/Users/DanielSrb/Downloads/` |
+| `~/vm/cap*.txt`, `~/vm/xu*.txt` | raw usbmon captures, ~23MB | the findings are all transcribed into `insta360.md`; only re-capture if a new selector is needed |
+| `~/vm/win11.qcow2` | the Windows VM with the vendor app installed | needed only for the discovery rig below |
+| `/mnt/winos/Program Files/Insta360 Link Controller/` | the app binary the protobuf enums came from | the extracted enums are in `insta360.md` |
+
+The vendor default exposure curve was the one thing that existed *only* in a capture; it is
+now `tools/vendor-default-curve.txt`.
+
 ### The discovery rig, when a selector needs finding
 
 The method that found HDR after luminance testing had failed on it:
 
 1. Windows 11 in libvirt, camera passed through with `virsh attach-device`
-2. `sudo tools/usbmon-bin.py 3 --seconds 240 --out cap.txt --all` on the **host** — QEMU
+2. `virsh -c qemu:///system attach-device win11 tools/insta360-hostdev.xml --live`, and the
+   same with `detach-device` to take it back. A detach sometimes leaves the interfaces bound
+   to `usbfs` with no `/dev/video0`, fixed by a replug or by rebinding `3-1.4`
+3. `sudo tools/usbmon-bin.py 3 --seconds 240 --out cap.txt --all` on the **host** — QEMU
    passes USB through usbfs, so the transfers still cross the host kernel
-3. `tools/insta360-ws.py --url '<qr url>' --set hdr=1` drives the app's own remote protocol
-4. The capture shows exactly which selector the app wrote
+4. `tools/insta360-ws.py --url '<qr url>' --set hdr=1` drives the app's own remote protocol.
+   **The URL comes from the QR code in the app's sidebar and its token changes every run**,
+   so it cannot be recorded here — read it off the app each session
+5. The capture shows exactly which selector the app wrote
 
 `insta360-ws.py --dump-state` also prints the app's full 50-field view of the camera, which
 is the authoritative list of what the hardware supports.
