@@ -8,28 +8,112 @@ cameractrls is a Linux camera control utility providing CLI, GUI (GTK3/GTK4), an
 
 **This fork** adds Insta360 Link camera support via UVC Extension Units.
 
-## Insta360 Link Extension (Work in Progress)
+## Insta360 Link support — state of play
 
-**Research**: `insta360.md` - reverse engineering notes for UVC Extension Units
-**Prototype**: `insta360-ctrl.py` - standalone CLI script for testing
+Branch `insta360`, forked from upstream `main`. `insta360.md` is the full reverse
+engineering record; read it before touching any selector. `tools/` holds the rig that
+produced it.
 
-### Device Info
-- USB ID: `2e1a:4c01`
-- Unit 9 GUID: `faf1672d-b71b-4793-8c91-7b1c9b7f95f8`
+### Device
 
-### Confirmed Working Controls
-| Control | Selector | Size | Notes |
-|---------|----------|------|-------|
-| Exposure Mode | 0x1e | 1B | 1=manual, 2=auto (default), 3-5=auto variants |
-| Shutter Speed | 0x19 | 2B LE | µs, 100-33333, only works in manual mode |
-| Gain | 0x1b | 2B LE | 0-100 safe range, >100 crashes camera! |
+- USB ID `2e1a:4c01` (gen 1 Link), firmware `v1.4.5.8_build1`
+- Extension unit 9, GUID `faf1672d-b71b-4793-8c91-7b1c9b7f95f8`, 30 selectors
+- The Link 2 family (`4c04`-`4c07`) shares the same unit and is served by the same class
 
-### TODO
-1. Create `Insta360LinkCtrls` class following `KiyoProCtrls` pattern
-2. Add to `CameraCtrls` aggregation in `cameractrls.py`
-3. Find HDR, tracking mode, gesture controls
-4. Test preset storage (Unit 10 slots)
-5. Submit PR to upstream
+**Selector names are not guesses.** They come from the `ControlSelector` protobuf enum
+embedded in the vendor's Windows app, cross-checked against two different app builds. Do not
+rename or renumber them from inference — see "How the names were recovered" in `insta360.md`.
+
+### Shipping controls
+
+| Control | Selector | Notes |
+|---|---|---|
+| exposure_mode | 0x1e | 1 manual, 2 auto |
+| iso | 0x19 | 100-3200 |
+| shutter | 0x1d | **denominator**, 60 means 1/60s |
+| exposure_bias | 0x09 | signed, **0.01 EV per unit**, ±300 = ±3.00 EV |
+| exposure_curve | 0x10 | 256 points in 3 chunks, cannot be read back |
+| hdr, smart_composition, auto_tracking, single_tap_tracking, horizontal_correction, privacy_mode, high_framerate | 0x1b | bits 0x04, 0x01, 0x100, 0x400, 0x80, 0x800, 0x20 |
+| gesture_palm / _l / _v | 0x05 | bits 0x02, 0x04, 0x08; master switch is 0x1b bit 0x10 |
+| track_speed | 0x12 | 1 slow, 2 medium, 3 fast |
+| composition | 0x13 | 1 head, 2 half body, 3 whole body |
+| video_mode | 0x02 | byte 0: 0 normal, 4 whiteboard, 5 overhead, 6 deskview |
+| pan_speed / tilt_speed | 0x16 | `[pan sign, pan mag, tilt sign, tilt mag]`, stop is `00 01 00 01` |
+| serial | 0x0c | read-only |
+
+### Traps that cost real time
+
+- **XU writes only stick while the camera is streaming.** Written at idle they are accepted,
+  echoed by GET_CUR, then silently reverted about a second later. Every test needs an
+  `ffmpeg` capture running; `tools/daylight-probe.py` does this for you.
+- **0x19 is ISO, not exposure time.** An earlier version wrote microseconds into the ISO
+  register and got a plausible brightness change for entirely the wrong reason.
+- **0x1b bit 0x20 makes the camera re-enumerate.** That is the portrait / high frame rate
+  feature working, not a crash. Writes issued mid-re-enumeration fail with EPROTO.
+- **The camera's hub lives in the monitor.** Switch the monitor off and the camera leaves
+  the USB bus. Check whether the hubs went with it before suspecting the device.
+- **GET_MIN / GET_MAX are unreliable.** 0x09 reports ±4 when the real range is ±300.
+
+### Task at hand
+
+Three code paths are implemented but have **never been exercised against hardware**, because
+the camera went offline right after they were written. Everything they rest on is verified;
+it is the cameractrls plumbing that has not run.
+
+1. `insta360_pan_speed` / `insta360_tilt_speed` — the 0x16 protocol is confirmed on the
+   device (a 2 second burst at magnitude 8 swung the gimbal ~40°, reversible), but never
+   through `cameractrls.py -c`.
+2. `insta360_video_mode` — read path and the byte-0-in-52-byte-struct write path.
+3. `insta360_exposure_curve` — the chunked protocol is confirmed (gamma 2.2 vs 0.5 moved p5
+   from 31 to 47 with p95 held), but the five presets have not been driven through the menu.
+
+To verify, with the monitor on so the camera is present:
+
+```bash
+D=/dev/v4l/by-id/usb-Insta360_Insta360_Link-video-index0
+ffmpeg -nostdin -loglevel error -f v4l2 -input_format mjpeg -video_size 1280x720 \
+  -framerate 30 -i $D -f null - &          # writes need a live stream
+./cameractrls.py -d $D -c insta360_pan_speed=8      # gimbal should sweep right
+./cameractrls.py -d $D -c insta360_pan_speed=0      # and stop
+./cameractrls.py -d $D -c insta360_video_mode=overhead
+./cameractrls.py -d $D -c insta360_exposure_curve=bright
+```
+
+### Next steps, in order
+
+1. **Verify the three paths above**, then drop this list to whatever is left.
+2. **Upstream the cameractrls bugs separately.** Three fixes here are not Insta360 specific
+   and stand on their own: `to_bool()` on boolean params (inherited from PR #101, `hdr=0`
+   used to turn HDR *on*), and the PTZ arrow-key handler in both GUIs, which assumed both
+   speed sliders exist and bound only to controls literally named `pan_speed`.
+3. **Feed the findings back to upstream PR #101 / issue #55.** The PR has been open since
+   March 2026, covers only the Link 2, never places its gesture controls on a page so they
+   land in Advanced/Other, and its selector guesses are confirmed correct by this work on
+   different hardware. The protobuf extraction trick is the useful part for them.
+4. **Force-push `insta360`.** It was rebased onto upstream main, so `origin/insta360` has
+   diverged. Backup ref: `insta360-pre-rebase-backup`.
+5. **Open leads**, all needing the Windows app in a VM plus a usbmon capture:
+   - presets, unit 10 selectors 0x03-0x05, currently reading zeros
+   - `0x04 XU_PTZ_CMD`, a 262 byte command channel seen once as `a5 d0 03 00 f1 32 ...`
+   - video mode id 1, observed once and unidentified
+   - the ten `DeviceSettingInfo` fields (56-65) the app's own web client does not decode
+6. **Not reachable, stop looking.** Horizontal fine-tuning, smart adjustment, mirror H/V,
+   audio capture modes and the rock/OK gestures produce **zero** bus traffic when driven
+   through the vendor's own protocol. The app does them host-side or the gen 1 firmware
+   lacks them; `supportAudioCaptureMode` in the app's capability list confirms the latter.
+
+### The discovery rig, when a selector needs finding
+
+The method that found HDR after luminance testing had failed on it:
+
+1. Windows 11 in libvirt, camera passed through with `virsh attach-device`
+2. `sudo tools/usbmon-bin.py 3 --seconds 240 --out cap.txt --all` on the **host** — QEMU
+   passes USB through usbfs, so the transfers still cross the host kernel
+3. `tools/insta360-ws.py --url '<qr url>' --set hdr=1` drives the app's own remote protocol
+4. The capture shows exactly which selector the app wrote
+
+`insta360-ws.py --dump-state` also prints the app's full 50-field view of the camera, which
+is the authoritative list of what the hardware supports.
 
 ## Running the Applications
 
@@ -43,11 +127,10 @@ No build step required - pure Python with direct execution:
 ./cameraview.py -d /dev/video0         # SDL camera viewer
 ./cameractrlsd.py                      # Control restore daemon
 
-# Insta360 Link standalone (prototype)
-./insta360-ctrl.py                     # Show current values
-./insta360-ctrl.py mode manual         # Enable manual exposure
-./insta360-ctrl.py shutter 1/60        # Set shutter speed
-./insta360-ctrl.py gain 50             # Set gain (0-100)
+# Insta360 Link research tools, see tools/README.md
+./tools/insta360-ctrl.py               # Standalone read/set of the confirmed selectors
+./tools/daylight-probe.py              # Measure a selector against frame statistics
+./tools/insta360-ws.py --dump-state --url '<qr url>'   # The app's own remote protocol
 ```
 
 ## Architecture
@@ -60,7 +143,7 @@ No build step required - pure Python with direct execution:
 **Key Classes**:
 - `BaseCtrl` - Abstract base for all controls (integer, boolean, menu, button types)
 - `V4L2Ctrls` - Standard V4L2 controls via VIDIOC_QUERYCTRL
-- `KiyoProCtrls`, `LogitechCtrls`, `DellUltraSharpCtrls`, `AnkerWorkCtrls` - UVC extension units
+- `KiyoProCtrls`, `LogitechCtrls`, `DellUltraSharpCtrls`, `AnkerWorkCtrls`, `Insta360Ctrls` - UVC extension units
 - `ConfigPreset`, `ColorPreset` - Save/restore control presets
 - `PTZController`, `PTZHWControllers` - Pan/Tilt/Zoom input handling
 
