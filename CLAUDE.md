@@ -114,7 +114,16 @@ only the GTK GUI and the preview need the packaged build.
 
 - The speed sliders are `zeroer`: releasing the mouse returns them to zero, which is what
   stops the gimbal. **Scrolling a slider never produces a button release**, so that path had
-  to be handled separately or the camera kept panning forever.
+  to be handled separately or the camera kept panning forever. They are labelled **Pan** and
+  **Tilt**, not "Pan Speed" — the text ids stay `insta360_pan_speed` / `insta360_tilt_speed`,
+  so CLI usage and saved presets are unchanged.
+- **Never update a slider with `gui_value_set` from a poll.** It feeds the adjustment whose
+  `value-changed` handler writes back to the camera. `update_ctrl` guards with "only if out
+  of sync", which looks like enough and is not: `pan_absolute` has a step of 3600, the widget
+  rounds the polled position, and the rounded value differs from the real one — so every tick
+  issued an absolute move. Including the three seconds of polling after the speed slider
+  snapped back to zero, which made the gimbal carry on moving instead of stopping. Use
+  `set_ctrl_value_silently()`, which blocks the handler around the set.
 - Absolute pan and tilt are polled while a speed is non-zero. Movement over the extension
   unit emits no `V4L2_EVENT_CTRL`, so the GUI has nothing to react to and the sliders would
   show a stale position.

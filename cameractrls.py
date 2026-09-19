@@ -2363,7 +2363,7 @@ class Insta360Ctrls:
             ),
             Insta360Ctrl(
                 'insta360_pan_speed',
-                'Pan Speed',
+                'Pan',
                 'integer',
                 'Drive the gimbal left or right continuously. Snaps back to zero, which stops it',
                 INSTA360_PANTILT_RELATIVE_SELECTOR,
@@ -2376,7 +2376,7 @@ class Insta360Ctrls:
             ),
             Insta360Ctrl(
                 'insta360_tilt_speed',
-                'Tilt Speed',
+                'Tilt',
                 'integer',
                 'Drive the gimbal up or down continuously. Snaps back to zero, which stops it',
                 INSTA360_PANTILT_RELATIVE_SELECTOR,

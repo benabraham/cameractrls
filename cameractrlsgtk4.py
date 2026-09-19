@@ -332,7 +332,7 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
 
                     if c.type == 'integer':
                         adjustment = Gtk.Adjustment(lower=c.min, upper=c.max, value=c.value, step_increment=1)
-                        adjustment.connect('value-changed', lambda a,c=c: self.update_ctrl(c, a.get_value()))
+                        value_handler = adjustment.connect('value-changed', lambda a,c=c: self.update_ctrl(c, a.get_value()))
                         scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, hexpand=True, halign=Gtk.Align.END,
                             digits=0, has_origin=False, draw_value=True, value_pos=Gtk.PositionType.LEFT, adjustment=adjustment, width_request=264)
                         if c.zeroer:
@@ -399,6 +399,7 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
                         scale_stack.add_child(spin_box)
                         ctrl_box.append(scale_stack)
                         c.gui_value_set = scale.set_value
+                        c.gui_write_handler = (adjustment, value_handler)
                         c.gui_ctrls += [scale, spin, refresh]
                         c.gui_default_btn = refresh
 
@@ -569,6 +570,23 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
         scale.set_value(0)
         return GLib.SOURCE_REMOVE
 
+    # Reporting where the gimbal is must not look like the user moving the slider.
+    # gui_value_set feeds the adjustment whose value-changed handler writes back to the
+    # camera, and update_ctrl's "only if out of sync" guard does not save us: pan_absolute
+    # has a step of 3600, so the widget rounds the position and the rounded value differs
+    # from the real one. Every poll tick then commanded an absolute move — including the
+    # three seconds of polling after the speed slider snapped back to zero, which is why
+    # the gimbal carried on in the direction it had been going.
+    def set_ctrl_value_silently(self, c, value):
+        handler = getattr(c, 'gui_write_handler', None)
+        if handler is None:
+            c.gui_value_set(value)
+            return
+        adjustment, handler_id = handler
+        adjustment.handler_block(handler_id)
+        c.gui_value_set(value)
+        adjustment.handler_unblock(handler_id)
+
     # Movement driven over the extension unit emits no V4L2 event, so the absolute pan and
     # tilt sliders would keep showing the position from before the gimbal moved.
     def track_ptz_position(self, moving):
@@ -589,7 +607,7 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
                 if ctrl is not None:
                     ctrl.value = position[text_id]
             if ctrl is not None and ctrl.gui_value_set:
-                ctrl.gui_value_set(ctrl.value)
+                self.set_ctrl_value_silently(ctrl, ctrl.value)
 
         if self.ptz_moving:
             return GLib.SOURCE_CONTINUE
