@@ -28,6 +28,9 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
         self.zoom_absolute_sc = None
         self.pan_speed_sc = None
         self.tilt_speed_sc = None
+        self.ptz_poll_id = None
+        self.ptz_moving = False
+        self.ptz_idle_ticks = 0
         self.pan_absolute_sc = None
         self.tilt_absolute_sc = None
 
@@ -333,6 +336,10 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
                         scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, hexpand=True, halign=Gtk.Align.END,
                             digits=0, has_origin=False, draw_value=True, value_pos=Gtk.PositionType.LEFT, adjustment=adjustment, width_request=264)
                         if c.zeroer:
+                            scroll = Gtk.EventControllerScroll(
+                                flags=Gtk.EventControllerScrollFlags.BOTH_AXES)
+                            scroll.connect('scroll', self.handle_zeroer_scroll, scale)
+                            scale.add_controller(scroll)
                             for controller in scale.observe_controllers():
                                 if isinstance(controller, gi.repository.Gtk.GestureClick):
                                     controller.connect('released', lambda c, n, x, y, sc=scale: sc.set_value(0))
@@ -516,6 +523,8 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
                 return
 
         self.update_ctrls_state()
+        if ctrl.text_id in ('insta360_pan_speed', 'insta360_tilt_speed'):
+            self.track_ptz_position(value != 0)
         if ctrl.reopener:
             GLib.idle_add(self.reopen_device)
 
@@ -544,6 +553,45 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
         if c.gui_value_set:
             c.gui_value_set(c.value)
         self.update_ctrl_state(c)
+
+    def handle_zeroer_scroll(self, controller, dx, dy, scale):
+        # scrolling a slider never produces a button release, so the release handler that
+        # returns it to zero never runs and the gimbal would keep moving. Re-arm a short
+        # timer on every scroll event and zero it once scrolling stops.
+        timeout = getattr(scale, 'zeroer_timeout', None)
+        if timeout is not None:
+            GLib.source_remove(timeout)
+        scale.zeroer_timeout = GLib.timeout_add(400, self.reset_zeroer, scale)
+        return False
+
+    def reset_zeroer(self, scale):
+        scale.zeroer_timeout = None
+        scale.set_value(0)
+        return GLib.SOURCE_REMOVE
+
+    # Movement driven over the extension unit emits no V4L2 event, so the absolute pan and
+    # tilt sliders would keep showing the position from before the gimbal moved.
+    def track_ptz_position(self, moving):
+        self.ptz_moving = moving
+        self.ptz_idle_ticks = 0
+        if self.ptz_poll_id is None:
+            self.ptz_poll_id = GLib.timeout_add(250, self.poll_ptz_position)
+
+    def poll_ptz_position(self):
+        for text_id in ('pan_absolute', 'tilt_absolute'):
+            ctrl = self.camera.v4l_ctrls.refresh_ctrl_value(text_id)
+            if ctrl is not None and ctrl.gui_value_set:
+                ctrl.gui_value_set(ctrl.value)
+
+        if self.ptz_moving:
+            return GLib.SOURCE_CONTINUE
+
+        # the gimbal coasts for a moment after the stop, so keep reading for a little longer
+        self.ptz_idle_ticks += 1
+        if self.ptz_idle_ticks < 12:
+            return GLib.SOURCE_CONTINUE
+        self.ptz_poll_id = None
+        return GLib.SOURCE_REMOVE
 
     def handle_ptz_speed_key_pressed(self, c, keyval, keycode, state):
         # a camera can expose one axis without the other, or neither

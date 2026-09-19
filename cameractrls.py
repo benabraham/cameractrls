@@ -2884,6 +2884,20 @@ class V4L2Ctrls:
         else:
             None
 
+    # A gimbal driven over an extension unit moves without the driver emitting any V4L2
+    # event, so the position has to be re-read on demand rather than waited for.
+    def refresh_ctrl_value(self, text_id):
+        ctrl = find_by_text_id(self.ctrls, text_id)
+        if ctrl is None or getattr(ctrl, 'v4l2_id', None) is None:
+            return None
+        try:
+            value = v4l2_control(ctrl.v4l2_id)
+            ioctl(self.fd, VIDIOC_G_CTRL, value)
+        except OSError:
+            return None
+        ctrl.value = int(value.value)
+        return ctrl
+
 
 class V4L2Listener(Thread):
     def __init__(self, ctrls, fmt_ctrls, cb, err_cb):
@@ -3725,6 +3739,7 @@ class CameraCtrls:
         self.fd = fd
         self.v4l_ctrls = V4L2Ctrls(device, fd)
         self.fmt_ctrls = V4L2FmtCtrls(device, fd)
+        insta360_ctrls = Insta360Ctrls(device, fd)
         self.ctrls = [
             self.v4l_ctrls,
             self.fmt_ctrls,
@@ -3732,12 +3747,18 @@ class CameraCtrls:
             LogitechCtrls(device, fd),
             DellUltraSharpCtrls(device, fd),
             AnkerWorkCtrls(device, fd),
-            Insta360Ctrls(device, fd),
+            insta360_ctrls,
             SystemdSaver(self),
             ColorPreset(self),
             ConfigPreset(self),
             DesktopPortal(self),
         ]
+
+        # The Insta360 Link advertises V4L2 pan and tilt speed, then reports a zero range and
+        # fails every write with EIO. Drop those dead sliders, insta360_pan_speed and
+        # insta360_tilt_speed drive the gimbal instead.
+        if insta360_ctrls.supported():
+            pop_list_by_ids(self.v4l_ctrls.get_ctrls(), [V4L2_CID_PAN_SPEED, V4L2_CID_TILT_SPEED])
 
     def has_ptz(self):
         return any([
