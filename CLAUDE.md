@@ -123,9 +123,24 @@ only the GTK GUI and the preview need the packaged build.
 
 ### Acceptance checklist — the gate before any upstream PR
 
-Every control must be confirmed working by the user, or have a bug filed, before this goes
-upstream. Status is honest about *how* each was established, because bits named by lining
-send timestamps against a usbmon capture have already been wrong once.
+> **Hard rule: no pull request is opened until the user has confirmed every part works.**
+> Not "the protocol is understood", not "the write returns success", not "the register reads
+> back what we wrote" — the user has watched it do the right thing and said so. This applies
+> to the upstream PR and to anything offered upstream in a comment as working.
+>
+> The assistant does not open the PR, does not push the branch for it, and does not describe
+> it as ready. It prepares the branch, says what is still unconfirmed, and waits.
+>
+> **Two status words, and they are not interchangeable:**
+> - **measured** — an instrument says so: a register readback, frame statistics, a usbmon
+>   capture. This is *evidence*, not confirmation. It is what the assistant can produce alone.
+> - **user confirmed** — a person watched the camera and agreed. Only this passes the gate.
+>
+> Everything measured-but-unconfirmed either gets confirmed or gets a filed bug. The reason
+> the bar is here: a bit named by lining send timestamps against a usbmon capture has already
+> been wrong once, and it read as "measured" at the time.
+
+Status below is honest about *how* each was established.
 
 | Control | Status | How it stands today |
 |---|---|---|
@@ -152,6 +167,23 @@ send timestamps against a usbmon capture have already been wrong once.
 Also unconfirmed, all added 2026-09-19: the scroll-stop guard and the dead V4L2 speed
 controls disappearing. The position poll was **rewritten** — it used to read V4L2
 `pan_absolute`, which never updates; it now reads the extension unit, which does.
+
+#### The PTZ key guard PR has its own gate, and nothing in it is confirmed
+
+This is the one change headed upstream, so it carries the bar for somebody else's users. The
+crash path needs a camera with continuous zoom and no pan/tilt speed; the Link is not one, so
+confirming it may mean borrowing hardware or writing a stub.
+
+| What | Status |
+|---|---|
+| GTK4: arrow key on a zoom-only zeroer slider no longer raises `AttributeError` | ⬜ unconfirmed |
+| GTK4: the *release* of that key no longer raises either | ⬜ unconfirmed |
+| GTK4: zoom keys still work on that slider — the early return used to eat them | ⬜ unconfirmed |
+| GTK3: the same three | ⬜ unconfirmed |
+| Both: pan and tilt keys unchanged on a camera that has both axes | ⬜ unconfirmed |
+
+Branch `ptz-key-guard`, one commit on `upstream/main`. It stays local until the table is
+full.
 
 ### Task at hand
 
@@ -185,7 +217,10 @@ ffmpeg -nostdin -loglevel error -f v4l2 -input_format mjpeg -video_size 1280x720
    change also commanded a move, which is why the modes behaved oddly. Untested since the
    change. Then the remaining bits that need a person watching: smart composition,
    horizontal correction, composition style, and the curve presets in daylight.
-2. **One small upstream PR: the PTZ key handler guard.** This is the only fix here that is a
+2. **One small upstream PR: the PTZ key handler guard — branch `ptz-key-guard`, prepared,
+   not opened.** It waits on its own table in the acceptance checklist above; every row is
+   still unconfirmed. Do not push it, do not open it, do not call it ready until they are.
+   The bug itself: This is the only fix here that is a
    genuine upstream bug, re-verified against `upstream/main` (still 6f38825 on 2026-09-19).
    **Issue #91 is not it** — that one is an AnkerWork C310 FOV menu `ValueError` in
    `AnkerWorkCtrls.setup_ctrls`, unrelated. So nothing upstream describes this crash.
