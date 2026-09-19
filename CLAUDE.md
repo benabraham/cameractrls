@@ -71,6 +71,16 @@ pure flake evaluation rejects it.
 For quick iteration without a rebuild, `cameractrls.py -c` works straight from the checkout;
 only the GTK GUI and the preview need the packaged build.
 
+### Code traps in this file
+
+- **A boolean from the command line is the string `'0'`, which is truthy.** Every boolean
+  path goes through `to_bool()`. Getting this wrong made `insta360_hdr=0` turn HDR on, and
+  the bug came in with PR #101's code.
+- **usbmon's text interface truncates payloads at 32 bytes.** Anything larger — the 52 byte
+  video mode struct, the 255 byte curve, the PTZ commands — needs `tools/usbmon-bin.py`,
+  which reads the binary interface. Its header is 48 bytes on the `read()` path; the 64 byte
+  layout belongs to the mmap ABI only.
+
 ### Camera quirks that are not bugs in this code
 
 - **The gimbal does not move at all unless something is streaming.** The relative move
@@ -93,6 +103,37 @@ only the GTK GUI and the preview need the packaged build.
   show a stale position.
 - The camera's own V4L2 `pan_speed` and `tilt_speed` are dropped when `Insta360Ctrls` loads.
   It advertises them, reports a zero range, then fails every write with EIO.
+
+### Acceptance checklist — the gate before any upstream PR
+
+Every control must be confirmed working by the user, or have a bug filed, before this goes
+upstream. Status is honest about *how* each was established, because bits named by lining
+send timestamps against a usbmon capture have already been wrong once.
+
+| Control | Status | How it stands today |
+|---|---|---|
+| `insta360_exposure_mode` | ✅ measured | manual mode changes the image |
+| `insta360_iso` | ✅ measured | 100→3200 ladder, near linear |
+| `insta360_shutter` | ✅ measured | nine stops, halving each time |
+| `insta360_exposure_bias` | ✅ measured | ±3 EV sweep in daylight |
+| `insta360_high_framerate` | ✅ measured | format list gains 50/60 fps and portrait |
+| `insta360_pan_speed` / `_tilt_speed` | ✅ measured, GUI unconfirmed | CLI start/stop moves and halts the gimbal; the GUI slider fixes are untested |
+| `insta360_track_speed` | ✅ user confirmed | blind A/B, fast vs slow |
+| `insta360_composition` | ✅ user confirmed | head crops tighter than whole body, effect weak at distance |
+| `insta360_gesture_palm` | ✅ user confirmed | A/B, bit off means the gesture stops firing |
+| `insta360_portrait` | ✅ user confirmed | switches portrait/landscape — **was mislabelled single tap tracking** |
+| `insta360_serial` | ✅ | matches the sticker |
+| `insta360_gesture_l` / `_v` | ⚠️ inferred | from PR #101, never isolated in a test |
+| `insta360_hdr` | ⚠️ capture only | bit captured from the vendor protocol, effect never seen |
+| `insta360_auto_tracking` | ⚠️ capture only | same |
+| `insta360_privacy_mode` | ⚠️ capture only | same |
+| `insta360_smart_composition` | ⚠️ timestamp only | the weakest evidence class |
+| `insta360_horizontal_correction` | ⚠️ timestamp only | same |
+| `insta360_video_mode` | ⚠️ ids captured | never driven through cameractrls |
+| `insta360_exposure_curve` | ⚠️ protocol only | chunked writes proven on the device, menu presets never selected |
+
+Also unconfirmed, all added 2026-09-19: the position poll, the scroll-stop guard, and the
+dead V4L2 speed controls disappearing.
 
 ### Task at hand
 
