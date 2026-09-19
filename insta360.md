@@ -1198,6 +1198,22 @@ The live hypothesis for preset save and recall is **0x04 command 0x32**, the one
 the exe builds with a payload, and it builds it with exactly 3 bytes — enough for an
 operation and an index. Untested: it writes camera state, so it wants a human watching.
 
+### How far the gimbal actually turns
+
+V4L2 reports angles in arcseconds, and the mapping to the struct's tenths of a degree is
+exactly 1:1 — commanded 20°, 45°, 90° and 130° all arrive dead on. What is *not* right is the
+range the camera advertises:
+
+| Axis | V4L2 advertises | Actually reaches |
+|---|---|---|
+| pan | ±145.0° | **+136.7° / -137.2°** |
+| tilt up | +100.0° | **+41.4°** |
+| tilt down | -90.0° | **-70.2°** |
+
+Commanding 50° of tilt lands at 41.8°, so the stop is mechanical, not a scaling error — the
+axis is linear right up to it. Tilt is the bad one: more than half the advertised upward
+travel does not exist, so the top of that slider does nothing.
+
 ### Power-on defaults, read straight after a replug
 
 | Selector | Value | Note |

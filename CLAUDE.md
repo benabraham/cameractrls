@@ -104,6 +104,10 @@ only the GTK GUI and the preview need the packaged build.
 - **V4L2 `pan_absolute` reads back the last value written, not the position.** Pan and tilt
   share one UVC control, so after a speed move, writing either axis snaps the other back to
   its stale value. Measured: a speed pan to 73.9° was undone by a tilt write.
+- **The advertised pan and tilt range is too generous.** V4L2 says pan ±145° and tilt
+  -90°..+100°; measured, the gimbal stops at ±137° pan, +41° / -70° tilt. The mapping itself
+  is exact — arcseconds are degrees × 3600, linear to the stop — so the sliders now display
+  degrees via `format_value`. The bounds are left as the camera reports them.
 - **Hue is accepted and ignored.** Driving V4L2 hue across its full ±15 moved mean RGB by
   about 1, less than the drift between two readings at the same setting. The other colour
   controls work.

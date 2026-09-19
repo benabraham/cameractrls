@@ -2873,6 +2873,13 @@ class V4L2Ctrls:
                     v4l2ctrl.scale_class = 'white-balance-temperature'
                     v4l2ctrl.format_value = lambda s,v: f'{v:.0f} K'
 
+                # V4L2 angles are arcseconds, which nobody reads a gimbal in. Measured on the
+                # Insta360 Link gen 1: the mapping is exactly 1:1 with degrees up to the
+                # mechanical stop, pan +-137, tilt -70 to +41 — both well inside the range
+                # the camera advertises here.
+                if qctrl.id in [V4L2_CID_PAN_ABSOLUTE, V4L2_CID_TILT_ABSOLUTE]:
+                    v4l2ctrl.format_value = lambda s,v: f'{v / 3600:.1f}°'
+
                 if qctrl.id == V4L2_CID_EXPOSURE_ABSOLUTE:
                     v4l2ctrl.scale_class = 'dark-to-light'
                     v4l2ctrl.format_value = lambda s,v: f'{v:.0f}00 µs'
