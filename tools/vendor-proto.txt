@@ -1,0 +1,668 @@
+
+########## WebTransport.proto  (offset 0x1eb5aa0, 6037 bytes)
+message UVCRequest {
+    1 required string                       curDeviceSerialNum
+    2 required .ParamType                   paramType
+    3 required int64                        value
+}
+message UVCExtendRequest {
+    1 required string                       curDeviceSerialNum
+    2 required .ParamType                   paramType
+    3 required .ControlSelector             selector
+    4 repeated int32                        data
+    5 optional int32                        presetPosIndex
+}
+message DeviceInfoNotification {
+    1 repeated .DeviceBasicInfo             basicInfo
+    2 required string                       curDeviceSerialNum
+}
+message ValueChangeNotification {
+    1 required string                       curDeviceSerialNum
+    2 required .ParamType                   paramType
+    3 optional string                       newValue
+    4 optional .PTZParam                    ptzParam
+    5 optional .BeautyParam                 beautyParam
+    6 optional .MakeupParam                 makeupParam
+    7 optional .GreenScreenParam            greenScreenParam
+}
+message SwitchDeviceRequest {
+    1 required string                       curDeviceSerialNum
+    2 required string                       newDeviceSerialNum
+}
+message ConnectionNotification {
+    1 required uint32                       connectNum
+    2 required bool                         inControl
+}
+message ControlRequest {
+    1 required string                       token
+}
+message ControlResponse {
+    1 required bool                         success
+    2 optional .ControlResponse.FailureReason reason
+  enum FailureReason: UNKNOW_FAILURE=0, ANOTHER_CONNECTION_EXISTS=1, TOKEN_INVALID=2, ACTIVE_DISCONNECT=3
+}
+message HeartbeatRequest {
+}
+message HeartbeatResponse {
+}
+message PresetUpdateResponse {
+    1 required bool                         success
+    2 optional .PresetUpdateResponse.FailureReason reason
+    3 optional .DeviceBasicInfo             curDeviceInfo
+  enum FailureReason: UNKNOW_FAILURE=0, LINK_DISCONNECTED=1
+}
+message ImageParamPresetUpdateResponse {
+    1 required bool                         success
+    2 optional .ImageParamPresetUpdateResponse.FailureReason reason
+    3 optional .DeviceBasicInfo             curDeviceInfo
+  enum FailureReason: UNKNOW_FAILURE=0, LINK_DISCONNECTED=1
+}
+message ToastNotification {
+    1 required string                       curDeviceSerialNum
+    2 required string                       content
+}
+message BackgroundTemplate {
+    1 required int32                        index
+    2 required string                       type
+    3 optional bool                         isVideo
+    4 optional string                       imageType
+    5 optional bytes                        imageData
+    6 optional int64                        createTime
+}
+message BackgroundTemplateUpdateNotification {
+    1 repeated .BackgroundTemplate          backgroundTemplates
+    2 optional int32                        selectedIndex
+    3 required string                       curDeviceSerialNum
+}
+message Request {
+    1 optional bool                         hasUvcRequest
+    2 optional bool                         hasUvcExtendRequest
+    3 optional bool                         hasSwitchDeviceRequest
+    4 optional bool                         hasControlRequest
+    5 optional bool                         hasHeartbeatRequest
+    6 optional bool                         hasPresetUpdateRequest
+    7 optional bool                         hasValueChangeNotify
+   10 optional .UVCRequest                  uvcRequest
+   11 optional .UVCExtendRequest            uvcExtendRequest
+   12 optional .SwitchDeviceRequest         switchDeviceRequest
+   13 optional .ControlRequest              controlRequest
+   14 optional .HeartbeatRequest            heartbeatRequest
+   15 optional .PresetUpdateRequest         presetUpdateRequest
+   16 optional .ValueChangeNotification     valueChangeNotify
+}
+message Response {
+    1 optional bool                         hasDeviceInfoNotify
+    2 optional bool                         hasValueChangeNotify
+    3 optional bool                         hasControlResponse
+    4 optional bool                         hasConnectionNotify
+    5 optional bool                         hasHeartbeatResponse
+    6 optional bool                         hasPresetUpdateResponse
+    7 optional bool                         hasToastNotify
+    8 optional bool                         hasImageParamPresetUpdateRequest
+    9 optional bool                         hasBackgroundTemplateUpdateNotify
+   10 optional .DeviceInfoNotification      deviceInfoNotify
+   11 optional .ValueChangeNotification     valueChangeNotify
+   12 optional .ControlResponse             controlResponse
+   13 optional .ConnectionNotification      connectionNotify
+   14 optional .HeartbeatResponse           heartbeatResponse
+   15 optional .PresetUpdateResponse        presetUpdateResponse
+   16 optional .ToastNotification           toastNotify
+   17 optional .ImageParamPresetUpdateRequest imageParamRequest
+   18 optional .BackgroundTemplateUpdateNotification backgroundTemplateNotify
+}
+enum ParamType {
+     1 PARAM_MIRROR_VER
+     2 PARAM_MIRROR_HOR
+     3 PARAM_RESET_PTZ
+     4 PARAM_ZOOM
+     5 PARAM_VIDEO_MODE
+     6 PARAM_PTZ_MID
+     7 PARAM_PTZ_OP
+     8 PATAM_PTZ_HOST
+     9 PARAM_TRACK_SPEED
+    10 PARAM_COMPOSITION_STYLE
+    11 PARAM_COMPOSITION_STYLE_SWITCH
+    12 PARAM_AUTO_TRACK
+    13 PARAM_SINGLE_TAPTRACKING
+    14 PARAM_ISO_VALUE
+    15 PARAM_SHUTTER_VALUE
+    16 PARAM_EXPOSURE_COMPENSATION
+    17 PARAM_AUTO_EXPOSURE
+    18 PARAM_AUTO_FOCUS
+    19 PARAM_MANUAL_FOCUS_VALUE
+    20 PARAM_AUTO_WHITEBALANCE
+    21 PARAM_WHITE_BALANCE_TEMP
+    22 PARAM_BRIGHTNESS
+    23 PARAM_CONTRAST
+    24 PARAM_SATURATION
+    25 PARAM_SHARPNESS
+    26 PARAM_HDR
+    27 PARAM_AUTI_FLICK
+    28 PARAM_BLUR_SWITCH
+    29 PARAM_REPLACE_SWITCH
+    30 PARAM_BLUR_RADIUS
+    31 PARAM_BLUR_MODE
+    32 PARAM_REPLACE_INDEX
+    33 PARAM_AUDIO_CAPTURE_MODE
+    34 PARAM_SMART_ADJUST
+    35 PARAM_PRIVACY_MODE
+    36 PARAM_ROLL_ADJUST
+    37 PARAM_LOWER_RES
+    38 PARAM_VERTICAL_SCREEN
+    39 PARAM_GESTURE_TOTAL_SWITCH
+    40 PARAM_GESTURE_PALM_SWITCH
+    41 PARAM_GESTURE_V_SWITCH
+    42 PARAM_GESTURE_L_SWITCH
+    43 PARAM_GESTURE_ROCK_SWITCH
+    44 PARAM_GESTURE_OK_SWITCH
+    45 PARAM_HOST_PTZ_INFO
+    46 PARAM_IMAGE_FILTER
+    47 PARAM_IMAGE_TEMPLATE
+    48 PARAM_CLOSE_BLUR_REPLACE
+    49 PARAM_VIDEO_PRIVACY_MODE
+    50 PARAM_FINE_TUNING
+    51 PARAM_TRACK_FIRBOIDDEN_AREA
+    52 PARAM_VER_SCREEN_LOCK
+    53 PARAM_IMAGE_BEATY
+    54 PARAM_IMAGE_BEATY_TEMPLATE
+    55 PARAM_GREEN_SCREEN
+    56 PARAM_AUDIO_MODE
+    57 PARAM_PREVIEW_STATE
+    58 PARAM_4K_RESOLUTION
+    59 PARAM_SUPPORT_SUPER_BOKEH
+    60 PARAM_SUPPORT_4K_SUPER_BOKEH
+    61 PARAM_PITCH
+    62 PARAM_BACKGROUND_DETELE
+    63 PARAM_IS_VIRTUAL_CAMERA
+    64 PARAM_AUTO_PICK_COLOR
+    65 PARAM_FRAME_RATE
+    66 PARAM_DEFAULT_TRACK
+    67 PARAM_SUPPORT_GREEN_SCREEN
+   100 PARAM_ROLL
+   101 PARAM_PAN_TILT_ABSOLUTE
+   102 PARAM_PAN_TILT_RELATIVE
+   103 PARAM_PRESET_POSITION
+   104 PARAM_BIAS
+   105 PARAM_CHANGE_DEVICE_NAME
+   106 PARAM_RESOLUTION
+   107 PARAM_IMAGEPARAM_RESET
+   108 PARAM_SAVE_IMAGEPARAM_PRESET
+}
+enum ControlSelector {
+     0 XU_CONTROL_UNDEFINED
+     1 XU_EXEC_SCRIPT_CONTROL
+     2 XU_VIDEO_MODE_CONTROL
+     3 XU_DEVICE_INFO_CONTROL
+     4 XU_PTZ_CMD_CONTROL
+     5 XU_GESTURE_STATUS_CONTROL
+     6 XU_GESTURE_BIND_CONTROL
+     7 XU_NOISE_CANCEL_CONTROL
+     8 XU_FIRMWARE_UPGRADE_CONTROL
+     8 XU_BLEND_DRAW_CONTROL
+     9 XU_EXPOSURE_VALUE_CONTROL
+    10 XU_TAKE_PICTURE_CONTROL
+    11 XU_DEVICE_STATUS_CONTROL
+    12 XU_DEVICE_SN_CONTROL
+    13 XU_DEVICE_LICENSEN_CONTROL
+    14 XU_DEVICE_PARAM_CONTROL
+    15 XU_DOWNLOAD_FILE_CONTROL
+    15 XU_AF_MODE_CONTROL
+    16 XU_UPLOAD_FILE_CONTROL
+    16 XU_EXPOSURE_CURVE_CONTROL
+    17 XU_USB_MODE_SWITCH_CONTROL
+    18 XU_TRACK_SPEED_CONTROL
+    19 XU_LAYOUT_STYLE_CONTROL
+    20 XU_HEAD_LIST_CONTROL
+    21 XU_TRACK_TARGET_CONTROL
+    22 XU_PANTILT_RELATIVE_CONTROL
+    23 XU_MOBVOI_PUBKEY_CONTROL
+    24 XU_BIAS_CONTROL
+    25 XU_ISO_CONTROL
+    26 XU_PANTILT_ABSOLUTE_CONTROL
+    27 XU_FUNC_ENABLE_CONTROL
+    28 XU_VIDEO_RES_CONTROL
+    29 XU_EXPOSURE_TIME_ABSOLUTE_CONTROL
+    30 XU_AE_MODE_CONTROL
+}
+
+########## device.proto  (offset 0x1eb7870, 1284 bytes)
+message ZoomInfo {
+    1 required uint32                       curValue
+    2 required uint32                       minValue
+    3 required uint32                       maxValue
+}
+message PresetPosInfo {
+    1 required string                       name
+    2 required int32                        index
+    3 required bool                         is_default
+    4 optional string                       imageType
+    5 optional bytes                        imageData
+    6 optional int64                        createTime
+}
+message DeviceBasicInfo {
+    1 required string                       deviceName
+    2 required string                       serialNum
+    3 required .MettingCameraType           cameraType
+    4 optional .VideoModeType               VideoModeType
+    5 optional .ZoomInfo                    zoom
+    6 repeated .PresetPosInfo               presetInfos
+    7 optional int32                        curPresetPos
+    8 optional bool                         verticallyMirror
+    9 optional bool                         horizontallyMirror
+   10 optional .DeviceSettingInfo           settingInfos
+   11 optional float                        hostPTZx
+   12 optional float                        hostPTZy
+}
+message PTZParam {
+    1 optional float                        panSpeed
+    2 optional float                        tiltSpeed
+    3 optional float                        panValue
+    4 optional float                        tiltVaule
+    5 optional double                       hostPTZx
+    6 optional double                       hostPTZy
+}
+message PresetUpdateRequest {
+    1 required .PresetUpdateRequest.PresetUpdateType type
+    2 optional int32                        position
+    3 optional string                       name
+    4 required string                       curDeviceSerialNum
+  enum PresetUpdateType: ADD=0, UPDATE=1, DELETE=2, RENAME=3, SELECT=4, DEFAULT=5, UNDEFAULT=6
+}
+enum MettingCameraType {
+     0 Link
+     1 PUC2
+     2 PUC2_Flow
+     3 PUC3
+     4 PUC3_Flow
+}
+enum VideoModeType {
+     0 NORMAL_MODE
+     1 AUTO_COMPOSITION
+     2 TRACKING_MODE
+     4 WHITEBOARD_MODE
+     5 OVERHEAD_MODE
+     6 DESKVIEW_MODE
+     7 AUTOFRAMEING_MODE
+     8 SMARTWHITEBOARD_MODE
+     9 REGIONALTRACK_MODE
+    10 SMARTWHITEBOARD_QUERY
+    11 SMARTWHITEBOARD_CONFIG
+}
+
+########## settings.proto  (offset 0x1eb9910, 2078 bytes)
+message BeautyParam {
+    1 optional int32                        beatyId
+    2 optional int32                        whitening
+    3 optional int32                        smooth
+    4 optional int32                        clear
+    5 optional bool                         enabled
+}
+message MakeupParam {
+    1 optional int32                        templateId
+    2 optional int32                        intensity
+    3 optional bool                         enabled
+}
+message GreenScreenParam {
+    1 optional bool                         enabled
+    2 optional string                       color
+    3 optional int32                        intensity
+    4 optional int32                        smooth
+    5 optional int32                        remove
+    6 optional int32                        enhance
+}
+message ImageParamPreset {
+    1 required string                       name
+    2 required int32                        index
+}
+message ImageFilter {
+    1 required string                       name
+    2 required int32                        index
+}
+message DeviceSettingInfo {
+    1 optional int32                        compositionStyle
+    2 optional int32                        trackSpeed
+    4 optional bool                         enableAutoTrack
+    5 optional bool                         enableSingleTapTracking
+    6 optional bool                         compositionStyleEnabled
+    9 optional bool                         hdr
+   12 optional int32                        brightness
+   13 optional int32                        contrast
+   14 optional int32                        satutation
+   15 optional int32                        sharpening
+   16 optional bool                         imageParamReset
+   17 optional bool                         autoExposure
+   18 optional int32                        isoValue
+   19 optional int32                        shutterValue
+   20 optional int32                        exposureCompensation
+   21 optional bool                         autoWhiteBalance
+   22 optional int32                        whiteBalanceValue
+   34 optional int32                        antiFlicker
+   48 optional bool                         enableAutoFocus
+   49 optional int32                        maualFocus
+   23 repeated .ImageParamPreset            imageParamPresetInfos
+   24 repeated .ImageFilter                 imageFilterInfos
+   25 optional int32                        curImageParam
+   26 optional int32                        curImageFilter
+   27 required bool                         supportVirtualCamera
+   28 optional bool                         enableBackGroudBlur
+   29 optional bool                         enableBackGroudReplace
+   41 optional int32                        blurRadius
+   36 optional int32                        curBlurMode
+   31 repeated int32                        supportBlurModeList
+   32 optional int32                        replaceIndex
+   35 optional int32                        audioCaptureMode
+   37 optional bool                         enableSmartAdjust
+   38 optional bool                         enablePrivacyMode
+   39 optional bool                         enableRollAdjust
+   40 optional bool                         enableLowerRes
+   50 optional bool                         enableVerticalScreen
+   42 optional bool                         gestureEnabled
+   43 optional bool                         gesturePlamEnabled
+   44 optional bool                         gestureVEnabled
+   45 optional bool                         gestureLEnabled
+   46 optional bool                         gestureRockEnabled
+   47 optional bool                         gestureOkEnabled
+   51 optional bool                         videoPrivacyMode
+   54 optional bool                         verScreenLock
+   52 optional string                       resolution
+   53 optional float                        funeTuningValue
+   55 optional bool                         enableTrackForiddenArea
+   56 optional int32                        audioDirectionMode
+   57 optional .BeautyParam                 beautyParam
+   58 optional .MakeupParam                 makeupParam
+   59 optional .GreenScreenParam            greenScreenParam
+   60 optional bool                         enable4KResolution
+   61 optional bool                         supportSuperBokeh
+   62 optional bool                         support4KSuperBokeh
+   63 optional int32                        pitch
+   64 optional bool                         isVirtualCamera
+   65 optional bool                         supportGreenScreen
+}
+message ImageParamPresetUpdateRequest {
+    1 repeated .ImageParamPreset            imageParamPresetInfos
+    2 optional int32                        curImageParam
+    3 required string                       curDeviceSerialNum
+}
+
+########## VirtualCameraMessage.proto  (offset 0x1ecf0b0, 2851 bytes)
+message OverlayFontInfo {
+    1 required string                       font_path
+    2 required float                        font_size
+    3 required string                       font_color
+    4 required .OverlayFontStyle            font_style
+}
+message OverlayItem {
+    1 required int32                        id
+    2 required .OverlayType                 type
+    3 required float                        x
+    4 required float                        y
+    5 required float                        width
+    6 required float                        height
+    7 required int32                        z_index
+    8 required float                        rotation
+    9 required float                        scale
+   10 required float                        opacity
+   11 required bool                         locked
+   12 required bool                         visible
+   13 required string                       content
+   14 optional .OverlayFontInfo             font_info
+   15 optional float                        anchor_x
+   16 optional float                        anchor_y
+   17 optional bool                         mirror_h
+   18 optional bool                         mirror_v
+   19 optional bool                         paused
+   20 optional bool                         no_loop
+  100 optional string                       name
+}
+message OverlayScene {
+    1 optional int32                        selected_id
+    2 repeated .OverlayItem                 items
+    3 optional bool                         enabled
+}
+message OverlayItemStatus {
+    1 optional int32                        id
+    2 optional bool                         finished
+}
+message CameraControl {
+    1 required .ControlType                 type
+    2 required bool                         open_vb
+    3 required int32                        res_width
+    4 required int32                        res_height
+    5 required float                        frame_rate
+    6 required .ControlParamType            param_type
+    7 optional string                       param
+    8 optional string                       reserved
+    9 optional string                       reserved2
+   10 optional .OverlayItem                 overlay_item
+}
+message CameraStatus {
+    1 required string                       device_name
+    2 required bool                         opened
+    3 required .ControlType                 type
+    4 required int32                        blur_radius
+    5 required int32                        blur_mode
+    6 required bool                         enable_spot
+    7 required string                       path
+    8 required int32                        resolution
+    9 required int32                        error_code
+   10 optional bool                         device_occupied
+   11 optional int32                        alg_fps
+   12 repeated .OverlayItemStatus           overlay_status
+}
+message CameraMessageRequest {
+    1 required .MessageType                 type
+    2 required string                       pid
+    3 optional .CameraControl               control_type
+    4 optional string                       reserved
+}
+message CameraMessageResponse {
+    1 required .MessageType                 type
+    2 optional .MessageErrorCode            error_code
+    3 optional .CameraStatus                status
+}
+enum MessageType {
+     1 HEART_BEAT
+     2 CONTROL
+     3 CONTROL_REPLY
+     4 QUERY_CAMERA
+     5 QUERY_REPLY
+     6 ERROR_REPLY
+}
+enum ControlType {
+     1 ALL_TAKE_EFFECT
+     2 USE_NORMAL
+     3 USE_BACKGROUND_BLUR
+     4 USE_BACKGROUND_REPLACE_IMAGE
+     5 USE_BACKGROUND_REPLACE_VIDEO
+     6 USE_SMART_WHITEBOARD
+     7 CHANGE_RESOLUTION
+     8 START_SERVICE
+     9 SHUTDOWN_SERVICE
+    10 PAUSE_BLUR_REPLACE
+    11 SWITCH_DEVICE
+    12 USE_BYTEDANCE_EFFECT
+    13 USE_CHROMA_KEY
+    14 PAUSE_APPLY_EFFECT
+    15 USE_BYTEDANCE_TEMEPLATE
+    16 USE_OVERLAY
+}
+enum ControlParamType {
+     1 None
+     2 ADJUST_BLUR_RADIUS
+     3 ENABLE_SPOT
+     4 IMAGE_VIDEO_PATH
+     5 WHITEBOARD_JSON_PATH
+     6 CHANGE_BOKEH_MODE
+     7 CHROMA_KEY_SIMILARITY
+     8 CHROMA_KEY_SMOOTHNESS
+     9 CHROMA_KEY_SPILL
+    10 CHROMA_KEY_EDGE_ENHANCEMENT
+    11 CHROMA_KEY_BACKGROUD_IMAGE
+    12 CHROMA_KEY_COLOR
+    13 BEAUTY_SMOOTH
+    14 BEAUTY_CLEAR
+    15 BEAUTY_STRENGTH
+    16 BEAUTY_WHITENING
+    17 OVERLAY_POSITION
+    18 OVERLAY_SIZE
+    19 OVERLAY_ROTATION
+    20 OVERLAY_SCALE
+    21 OVERLAY_ANCHOR_X
+    22 OVERLAY_ANCHOR_Y
+    23 OVERLAY_Z_INDEX
+    24 OVERLAY_LOCKED
+    25 OVERLAY_VISIBLE
+    26 OVERLAY_CONTENT
+    27 OVERLAY_FONT_INFO
+    28 MAX_PARAM_TYPE
+}
+enum OverlayType {
+     1 IMAGE
+     2 VIDEO
+     3 TEXT
+     4 OTHER
+}
+enum OverlayFontStyle {
+     0 NORMAL
+     1 BOLD
+     2 ITALIC
+     3 UNDERLINE
+     4 BOLD_ITALIC
+     5 BOLD_UNDERLINE
+     6 ITALIC_UNDERLINE
+     7 BOLD_ITALIC_UNDERLINE
+}
+enum MessageErrorCode {
+     1 CODE_ERROR
+     2 CODE_SUCCESS
+}
+
+########## proto_datas.proto  (offset 0xc908280, 3133 bytes)
+message PbMsg_Rect2d {
+    1 optional double                       topleft_x
+    2 optional double                       topleft_y
+    3 optional double                       width
+    4 optional double                       height
+}
+message PbMsg_DetResult {
+    1 repeated float                        confs
+    2 repeated .PbMsg_Rect2d                bbox
+    3 repeated string                       names
+}
+message PbMsg_SampledMergedDetItem {
+    1 repeated int32                        frame_ids
+    2 repeated float                        pcd_scores
+    3 repeated float                        animal_scores
+    4 repeated float                        face_scores
+    5 repeated float                        face_distort_scores
+    6 repeated float                        baby_scores
+    7 repeated .PbMsg_DetResult             pcd_res
+    8 repeated .PbMsg_DetResult             animal_res
+    9 repeated .PbMsg_DetResult             face_res
+   10 repeated .PbMsg_DetResult             face_distort_res
+   11 repeated .PbMsg_DetResult             baby_res
+}
+message PbMsg_SampledSceneryDetItem {
+    1 repeated int32                        frame_ids
+    2 repeated float                        scores
+    3 repeated .PbMsg_DetResult             res
+}
+message PbMsg_SampledModuleItem {
+    1 repeated int32                        frame_ids
+    2 repeated float                        scores
+}
+message PbMsg_FloatVector {
+    1 repeated float                        values
+}
+message PbMsg_SampledDedupFeat {
+    1 repeated int32                        frame_ids
+    2 repeated .PbMsg_FloatVector           dedup_feats
+}
+message PbMsg_SampledSceneItem {
+    1 repeated int32                        frame_ids
+    2 repeated .PbMsg_FloatVector           scores
+}
+message PbMsg_VideoInfo {
+    1 optional float                        fps
+    2 optional int32                        height
+    3 optional int32                        width
+    4 optional int32                        frame_count
+    5 optional string                       video_name
+    6 optional .PbMsg_CAMERA_MODE           usr_mode
+    7 optional .PbMsg_CAMERA_MODE           alg_mode
+}
+message PbMsg_SampledModuleInfo {
+    1 optional .PbMsg_SampledMergedDetItem  merged_det
+    2 optional .PbMsg_SampledSceneryDetItem scenery_det
+    3 optional .PbMsg_SampledModuleItem     emotion
+    4 optional .PbMsg_SampledModuleItem     occlusion
+    5 optional .PbMsg_SampledModuleItem     relic
+    6 optional .PbMsg_SampledModuleItem     pov
+    7 optional .PbMsg_SampledModuleItem     places
+    8 optional .PbMsg_SampledSceneItem      video_scene
+    9 optional .PbMsg_SampledModuleItem     motion
+   10 optional .PbMsg_SampledModuleItem     shake
+   11 optional .PbMsg_SampledModuleItem     highlight
+   12 optional .PbMsg_SampledModuleItem     doing
+   13 optional .PbMsg_SampledModuleItem     hl_waste
+   14 optional .PbMsg_SampledModuleItem     hl_waste_filter
+   15 optional .PbMsg_SampledDedupFeat      dedup_feat
+   16 optional .PbMsg_VideoInfo             video_info
+   17 optional .PbMsg_SampledModuleItem     waste
+   18 optional .PbMsg_SampledModuleItem     pano_dewaste
+   19 optional .PbMsg_SampledDedupFeat      sscd
+   20 optional .PbMsg_SampledModuleItem     figure_cut
+}
+message PbMsg_PlaneFrontResult {
+    1 repeated int32                        pending_area
+    2 repeated int32                        finished_area
+    3 optional .PbMsg_SampledModuleInfo     sampled_info
+}
+message PbMsg_SpecialFrontResult {
+    1 optional int32                        section_first
+    2 optional int32                        section_second
+    3 optional .PbMsg_SampledModuleInfo     sampled_info
+}
+message PbMsg_PanoVideoSectionInfo {
+    1 optional int32                        section_id
+    2 optional int32                        start_frame
+    3 optional int32                        end_frame
+    4 optional int32                        start_move_frame
+    5 optional int32                        end_move_frame
+    6 optional int32                        move_type
+    7 optional int32                        section_rank
+    8 repeated int32                        section_types
+    9 repeated .PbMsg_PanoVideoSectionInfo.View view_list
+  message View {
+      1 optional float                        score
+      2 optional float                        confidence
+  }
+}
+message PbMsg_TrackFrontInfo {
+    1 optional .PbMsg_PanoVideoSectionInfo  section_info
+    2 optional .PbMsg_SampledModuleInfo     sampled_info
+}
+message PbMsg_PanoFrontResult {
+    1 repeated .PbMsg_TrackFrontInfo        pano_front_result
+}
+message PbMsg_SaveFrontendInfo {
+    1 optional string                       video_name
+    2 optional .PbMsg_PlaneFrontResult      plane_sampled_info
+    3 optional string                       type
+    4 optional .PbMsg_PanoFrontResult       pano_sampled_info
+    5 optional .PbMsg_SpecialFrontResult    special_sampled_info
+}
+enum PbMsg_CAMERA_MODE {
+     0 kNone
+     1 kBASE
+     2 kVLOG
+     3 kBABY
+     4 kCYCLING
+     5 kRUNNING
+     6 kOUTDOOR
+     7 kSTARRY_NIGHT
+     8 kSKIING
+     9 kSURFING
+    10 kPET
+    11 kDRIVING
+}
