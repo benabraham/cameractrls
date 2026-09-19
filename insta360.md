@@ -360,6 +360,22 @@ extra gestures are most likely Link 2 features.
 Captured with `usbmon-bin.py` while the user drove the vendor app's own controls, so these
 are full payloads rather than the 32 byte truncations the text interface gives.
 
+### Correction 2026-09-19: 0x1b bit 0x0400 is portrait, not single tap tracking
+
+Hands-on testing showed bit 0x0400 **switches the image between portrait and landscape**.
+It was originally labelled Single Tap Tracking, from lining up send timestamps against the
+capture — the arithmetic put the write next to a `single_tap_tracking` send, and nothing in
+the bus trace contradicted it.
+
+The lesson for the rest of this file: **timestamp correlation names a bit, it does not prove
+what the bit does.** Bits confirmed only that way are worth re-checking by hand. The ones
+verified by watching the image or the gimbal — HDR, privacy, high frame rate, AI tracking,
+gestures — are not affected.
+
+Note the camera therefore has two separate portrait concepts: bit 0x0020 makes portrait
+*resolutions* available and re-enumerates, while bit 0x0400 switches the current image
+orientation.
+
 ### 0x16 XU_PANTILT_RELATIVE — continuous gimbal movement ✅
 
 Four bytes, `[pan sign, pan magnitude, tilt sign, tilt magnitude]`:
@@ -727,7 +743,7 @@ Source: the 8 screenshots of Insta360 Link Controller taken 2025-12-10 on this c
 | Composition Head / Half / Whole | ✅ | XU 0x13 |
 | Tracking Speed | ✅ | XU 0x12 |
 | Enable Auto Tracking | ✅ | XU 0x1b bit 0x0100 |
-| Single Tap Tracking | ✅ | XU 0x1b bit 0x0400 |
+| Portrait / landscape | ✅ | XU 0x1b bit 0x0400 |
 
 ### Effects tab
 
@@ -922,7 +938,7 @@ recovered" below to redo it. ✅ = verified on this camera, gen 1, firmware v1.4
 | 0x18 | XU_BIAS_CONTROL | 4 | rw | 48, 2643. Distinct from 0x09 — the ParamType enum groups PARAM_BIAS with the PTZ family, so this is likely the horizontal fine-tuning |
 | 0x19 | XU_ISO_CONTROL | 2 | rw | ✅ **ISO**. 100 → luminance 3.8, 400 → 10.2, 1600 → 26.4, 3200 → 40.5 |
 | 0x1a | XU_PANTILT_ABSOLUTE_CONTROL | 8 | rw | ✅ 2 × int32 LE arc-seconds, **tilt first, then pan** |
-| 0x1b | XU_FUNC_ENABLE_CONTROL | 2 | rw | ✅ function bitmask: **0x01** smart composition, **0x04** HDR, **0x10** gestures, **0x20** portrait/high frame rate (re-enumerates), **0x80** horizontal correction, **0x100** AI tracking, **0x400** single tap tracking, **0x800** privacy mode |
+| 0x1b | XU_FUNC_ENABLE_CONTROL | 2 | rw | ✅ function bitmask: **0x01** smart composition, **0x04** HDR, **0x10** gestures, **0x20** portrait/high frame rate (re-enumerates), **0x80** horizontal correction, **0x100** AI tracking, **0x400** portrait/landscape switch, **0x800** privacy mode |
 | 0x1c | XU_VIDEO_RES_CONTROL | 10 | rw | mirrors the active stream format, zeros while idle |
 | 0x1d | XU_EXPOSURE_TIME_ABSOLUTE_CONTROL | 2 | rw | ✅ **shutter as denominator**, 60 = 1/60s. 1/30 → 85.0, 1/120 → 38.4, 1/1000 → 14.9, 1/8000 → 8.2. Firmware quantises: 30 reads back 29 |
 | 0x1e | XU_AE_MODE_CONTROL | 1 | rw | ✅ exposure mode, 1 = manual, 2 = auto. 0 and 4 behave like auto, 3 and 5 are ~1 stop darker. None of them is HDR |

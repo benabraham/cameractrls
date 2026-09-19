@@ -33,7 +33,7 @@ rename or renumber them from inference — see "How the names were recovered" in
 | shutter | 0x1d | **denominator**, 60 means 1/60s |
 | exposure_bias | 0x09 | signed, **0.01 EV per unit**, ±300 = ±3.00 EV |
 | exposure_curve | 0x10 | 256 points in 3 chunks, cannot be read back |
-| hdr, smart_composition, auto_tracking, single_tap_tracking, horizontal_correction, privacy_mode, high_framerate | 0x1b | bits 0x04, 0x01, 0x100, 0x400, 0x80, 0x800, 0x20 |
+| hdr, smart_composition, auto_tracking, portrait, horizontal_correction, privacy_mode, high_framerate | 0x1b | bits 0x04, 0x01, 0x100, 0x400, 0x80, 0x800, 0x20 |
 | gesture_palm / _l / _v | 0x05 | bits 0x02, 0x04, 0x08; master switch is 0x1b bit 0x10 |
 | track_speed | 0x12 | 1 slow, 2 medium, 3 fast |
 | composition | 0x13 | 1 head, 2 half body, 3 whole body |

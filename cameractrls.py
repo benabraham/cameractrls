@@ -2200,7 +2200,7 @@ INSTA360_FUNC_BIT_HDR = 0x0004
 INSTA360_FUNC_BIT_HIGH_FRAMERATE = 0x0020
 INSTA360_FUNC_BIT_ROLL_ADJUST = 0x0080
 INSTA360_FUNC_BIT_AUTO_TRACKING = 0x0100
-INSTA360_FUNC_BIT_SINGLE_TAP_TRACKING = 0x0400
+INSTA360_FUNC_BIT_PORTRAIT = 0x0400
 INSTA360_FUNC_BIT_PRIVACY_MODE = 0x0800
 
 ## Manual exposure, gen 1 Link only
@@ -2386,13 +2386,13 @@ class Insta360Ctrls:
                 reopener=True,
             ),
             Insta360Ctrl(
-                'insta360_single_tap_tracking',
-                'Single Tap Tracking',
+                'insta360_portrait',
+                'Portrait Mode',
                 'boolean',
-                'Track whoever is tapped, instead of following automatically',
+                'Switch the image between portrait and landscape',
                 INSTA360_FUNC_STATUS_SELECTOR,
                 INSTA360_FUNC_STATUS_LENGTH,
-                func_bit=INSTA360_FUNC_BIT_SINGLE_TAP_TRACKING,
+                func_bit=INSTA360_FUNC_BIT_PORTRAIT,
             ),
             Insta360Ctrl(
                 'insta360_horizontal_correction',
@@ -3821,7 +3821,7 @@ class CameraCtrls:
                         'insta360_tilt_speed',
                         'insta360_auto_tracking',
                         'insta360_smart_composition',
-                        'insta360_single_tap_tracking',
+                        'insta360_portrait',
                         'insta360_horizontal_correction',
                     ]) +
                     pop_list_by_ids(ctrls, [
