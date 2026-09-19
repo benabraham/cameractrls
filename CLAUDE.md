@@ -105,9 +105,15 @@ only the GTK GUI and the preview need the packaged build.
   share one UVC control, so after a speed move, writing either axis snaps the other back to
   its stale value. Measured: a speed pan to 73.9° was undone by a tilt write.
 - **The advertised pan and tilt range is too generous.** V4L2 says pan ±145° and tilt
-  -90°..+100°; measured, the gimbal stops at ±137° pan, +41° / -70° tilt. The mapping itself
+  -90°..+100°; measured, the gimbal stops at ±137° pan and **±68°** tilt (+67.6 / -69.4),
+  confirmed three ways. Allow ten seconds for a full sweep to settle before reading the
+  position — a six second wait once produced a bogus +41°, read mid-travel. The mapping itself
   is exact — arcseconds are degrees × 3600, linear to the stop — so the sliders now display
   degrees via `format_value`. The bounds are left as the camera reports them.
+- **The level compensation slider in the Windows app is host-side.** `XU_BIAS` 0x18 takes a
+  float32 and echoes it perfectly, and nothing in the image moves — tested at ±5° and 10°
+  with the 0x80 correction bit on, against a noise floor of 0.89. There is no camera control
+  to expose; it would have to be a rotation in `cameraview.py`.
 - **Hue is accepted and ignored.** Driving V4L2 hue across its full ±15 moved mean RGB by
   about 1, less than the drift between two readings at the same setting. The other colour
   controls work.

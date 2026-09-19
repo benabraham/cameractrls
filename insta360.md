@@ -1206,13 +1206,38 @@ range the camera advertises:
 
 | Axis | V4L2 advertises | Actually reaches |
 |---|---|---|
-| pan | ±145.0° | **+136.7° / -137.2°** |
-| tilt up | +100.0° | **+41.4°** |
-| tilt down | -90.0° | **-70.2°** |
+| pan | ±145.0° | **+136.7° / -137.5°** |
+| tilt up | +100.0° | **+67.6°** |
+| tilt down | -90.0° | **-69.4°** |
 
-Commanding 50° of tilt lands at 41.8°, so the stop is mechanical, not a scaling error — the
-axis is linear right up to it. Tilt is the bad one: more than half the advertised upward
-travel does not exist, so the top of that slider does nothing.
+Repeated twice by absolute command and once more by holding a speed against the stop; all
+three agree. **An earlier note here said +41.4° up — that was wrong**, a position read taken
+while the gimbal was still travelling. Six seconds is not enough to settle a full sweep.
+
+So the axis is close to symmetric, ±68°, and the camera advertises roughly half again as
+much as it has. The published specs are no help: Insta360's marketing says "pan almost 360°"
+and "tilt 90°", and their own naming calls the *portrait rotation* the tilt axis, so the
+-90/+100 the camera reports over UVC may describe a different axis entirely.
+
+### The tilt speed runs backwards from the tilt angle
+
+`insta360_tilt_speed` positive drove the gimbal **down**, while `tilt_absolute` positive is
+up. Overhead mode settles the question — it parks at -90° pointing straight down, so negative
+is down — which makes the speed control the odd one out. Now negated when encoding, so
+positive is up on both, matching the up arrow key. Measured after the fix: +10 reaches
++52.6°, -10 reaches -52.9°.
+
+### Level compensation is not a camera control
+
+The Windows app's few-degrees levelling slider does **not** reach the camera. `XU_BIAS` 0x18
+is a float32 and currently reads 0.000247, which matches the app's `funeTuningValue`, and it
+accepts and echoes anything written — 5.0, -5.0, 10.0 all read back exactly. The image does
+not move: against a static scene with a noise floor of 0.89, every value landed between 0.98
+and 1.27, with the horizontal correction bit 0x80 enabled the whole time.
+
+That agrees with the older finding that driving fine-tuning through the vendor's own protocol
+produced no bus traffic. **The app rotates the image host-side.** Exposing it here would mean
+rotating in `cameraview.py`, not adding a control.
 
 ### Power-on defaults, read straight after a replug
 

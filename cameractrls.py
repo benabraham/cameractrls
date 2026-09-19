@@ -2715,6 +2715,12 @@ class Insta360Ctrls:
         for axis in ('insta360_pan_speed', 'insta360_tilt_speed'):
             speed = max(-INSTA360_PANTILT_SPEED_MAX,
                         min(INSTA360_PANTILT_SPEED_MAX, int(speeds.get(axis, 0))))
+            # The camera's tilt speed runs opposite to its own tilt angle: driving it
+            # positive lowers the gimbal. Overhead mode parks at -90 degrees pointing
+            # straight down, so negative is down and positive must mean up here too,
+            # matching tilt_absolute and the up arrow key.
+            if axis == 'insta360_tilt_speed':
+                speed = -speed
             if speed > 0:
                 payload += bytes([0x01, speed])
             elif speed < 0:
@@ -2875,8 +2881,8 @@ class V4L2Ctrls:
 
                 # V4L2 angles are arcseconds, which nobody reads a gimbal in. Measured on the
                 # Insta360 Link gen 1: the mapping is exactly 1:1 with degrees up to the
-                # mechanical stop, pan +-137, tilt -70 to +41 — both well inside the range
-                # the camera advertises here.
+                # mechanical stop, pan +-137 and tilt +-68 — both well inside the range the
+                # camera advertises here.
                 if qctrl.id in [V4L2_CID_PAN_ABSOLUTE, V4L2_CID_TILT_ABSOLUTE]:
                     v4l2ctrl.format_value = lambda s,v: f'{v / 3600:.1f}°'
 
