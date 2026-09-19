@@ -1282,6 +1282,21 @@ handed the driver 53 bytes for a 52 byte register and uvcvideo rejected the size
 slicing `Insta360Ctrls.query()` to the requested length. All four modes now set and read
 back.
 
+### Verified on the camera, after the fix
+
+Parked at pan 15.0°, then cycled through every mode:
+
+| Mode | id | Gimbal |
+|---|---|---|
+| whiteboard | 4 | **untouched**, held at pan 15.0° tilt 0.0° |
+| overhead | 5 | tilt to **-90.0°**, straight down |
+| deskview | 6 | tilt **-45.0°**, pan recentred to 0 |
+| normal | 0 | back to 0.0°, 0.0° |
+
+Whiteboard holding position is the proof the 3610 sentinel works — the write no longer
+commands a move. The angles under overhead and deskview are the camera aiming itself,
+camera-side behaviour that no cameractrls code asks for.
+
 ### The exposure curve framing, confirmed from the vendor's own writes
 
 Three chunk writes in the capture decode exactly as this code already builds them:

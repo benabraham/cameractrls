@@ -146,7 +146,7 @@ send timestamps against a usbmon capture have already been wrong once.
 | `insta360_privacy_mode` | ⚠️ capture only | same |
 | `insta360_smart_composition` | ⚠️ timestamp only | the weakest evidence class |
 | `insta360_horizontal_correction` | ⚠️ timestamp only | same |
-| `insta360_video_mode` | ✅ measured | all four modes set and read back, after fixing the ENOBUFS bug that blocked every write |
+| `insta360_video_mode` | ✅ measured | all four modes set and read back; overhead tilts to -90°, deskview to -45°, whiteboard leaves the gimbal alone |
 | `insta360_exposure_curve` | ⚠️ writes clean | all five presets write, framing confirmed against the vendor's capture, visual effect still unmeasured |
 
 Also unconfirmed, all added 2026-09-19: the scroll-stop guard and the dead V4L2 speed
