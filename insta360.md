@@ -507,9 +507,10 @@ int32 lists padded with -1, plausibly preset slots. Unexplored.
 
 ### The selector map, confirmed by a second independent build
 
-The VM runs app 2.2.4.14, whose bundled `ControlSelector` enum is a clean 0-30 list with no
-aliases, where the installed 2025 build had three aliased pairs. **Every selector we rely on
-matches across both builds**: GESTURE_STATUS 5, NOISE_CANCEL 7, EXPOSURE_VALUE 9, DEVICE_SN
+The VM runs app 2.2.4.14, the installed one is 2.0.6.2. **Every selector we rely on matches
+across both builds** — in fact the whole enum does, see the correction dated 2026-09-19 at
+the end of this file; the "no aliases in the newer build" claim here was an artifact of
+reading the enum out of the web bundle instead of the exe. The selectors: GESTURE_STATUS 5, NOISE_CANCEL 7, EXPOSURE_VALUE 9, DEVICE_SN
 12, TRACK_SPEED 18 (0x12), LAYOUT_STYLE 19 (0x13), BIAS 24 (0x18), ISO 25 (0x19),
 PANTILT_ABSOLUTE 26 (0x1a), FUNC_ENABLE 27 (0x1b), VIDEO_RES 28 (0x1c),
 EXPOSURE_TIME_ABSOLUTE 29 (0x1d), AE_MODE 30 (0x1e).
@@ -1049,3 +1050,310 @@ Standard UVC pan/tilt **speed** controls fail with error -5. Kernel disables the
 - **Does NOT** implement UVC Extension Units (no exposure mode, shutter, gain via XU)
 - **Useful for**: Presets system design (save/restore pan, tilt, zoom positions)
 - **Arc-seconds math**: `value / 3600 = degrees`
+
+---
+
+## 🛰️ 2026-09-19 — THE 0x04 COMMAND CHANNEL, AND THE SCHEMA BEHIND EVERYTHING
+
+Two new tools carry this section. `tools/xu-probe.py` reads or writes any selector on any
+unit and asks the device for its own lengths, so nothing here depends on a guess about
+sizes. `tools/extract-proto.py` pulls the vendor app's entire protobuf schema out of the
+exe; the result is checked in as `tools/vendor-proto.txt`.
+
+### 0x04 XU_PTZ_CMD — framing, decoded
+
+The 262 byte register is a command in, response out channel. Write a frame, wait about a
+second, read the reply from the same selector. **Writes only stick while streaming**, the
+usual rule.
+
+    offset  0  1   2    3    4  5    6 ...
+            a5 d0  cmd  len  tok      payload[len]
+
+- `a5 d0` magic, always.
+- `cmd` is echoed in the reply, or **0xff when the command is not supported**. That makes
+  the channel self-describing: send a command, read the first three bytes, and the camera
+  tells you whether it exists.
+- `len` counts the payload only.
+- `tok` is a CRC, and it is **not validated** — zeros work as well as the real thing. It is
+  reproduced below anyway, because the Link 2 firmware may well check it.
+- The device answers into its own 262 byte buffer and only overwrites the front, so bytes
+  past the current reply are stale from an earlier one. Always trust `len`, never the tail.
+
+### The checksum, recovered from the code
+
+The routine sits at `0x140abbe70` in the 2025 build and is a reflected CCITT CRC-16 — X-25's
+polynomial arrangement, init `0xFFFF` — over the **four header bytes plus a constant `0x2f`
+salt**, stored little-endian at offset 4. The salt is not a separate step in the exe; the
+loop runs over the header and then the tail does one more round with `0x2f` hard-coded.
+
+```python
+def token(header4):
+    crc = 0xffff
+    for b in header4 + b'\x2f':
+        x = (crc ^ b) & 0xff
+        x = (x ^ (x << 4)) & 0xff
+        crc = ((crc >> 8) ^ (x << 8) ^ (x << 3) ^ (x >> 4)) & 0xffff
+    return crc.to_bytes(2, 'little')
+```
+
+`token(bytes.fromhex('a5d00300'))` is `f1 32`, the exact bytes the vendor app sent. It also
+reproduces the device's own replies — `a5 d0 ff 00` → `66 1b`, `a5 d0 41 00` → `3f 81` —
+**but only when the payload is empty**. Replies that carry a payload put something else in
+those two bytes (`aa 00` for the 40 byte identity block, `01 01` for a 1 byte reply); no
+combination of range, init or salt reproduces those, so the field is not a payload CRC.
+
+### The commands this firmware answers
+
+Swept 0x00 to 0xfe with an empty payload. Thirteen exist:
+
+| cmd | reply len | payload | reading |
+|---|---|---|---|
+| 0x03 | 40 | see below | factory / gimbal identity |
+| 0x04 | 0 | — | ack only |
+| 0x05 | 1 | `61` (seen `71` once) | status byte, bit 0x10 changed once unprompted |
+| 0x06 | 0 | — | ack only |
+| 0x07 | 14 | `SWWYYNPTZXXX[5` | second serial field, also a template |
+| 0x09 | 3 | `00 bb d9` | stable across 30 s and across gimbal commands |
+| 0x10, 0x20, 0x31, 0x40, 0x41 | 0 | — | ack only |
+| 0x30 | 1 | `b5` | stable |
+| 0x32 | takes 3 bytes in | — | the only command the exe builds with a payload |
+
+Everything else returns `0xff`. The camera answered normally after both sweeps and
+`XU_DEVICE_SN` still read `IBJLA23066B543` — but see the warning below before repeating this.
+
+> ⚠️ **The sweep is not harmless. Do not repeat it.** Minutes after it, the gimbal began
+> panning and tilting continuously and would not stop. It was not the speed register —
+> `XU_PANTILT_RELATIVE` 0x16 read the idle `00 01 00 01` the whole time — and not tracking,
+> with `XU_FUNC_ENABLE` 0x1b at `0x0020`, auto tracking clear. Something in the 0x00-0xfe
+> range starts a gimbal routine that outlives the command and ignores the stop pattern. A
+> USB power cycle clears it. The status byte from command 0x05 also changed from `71` to
+> `61` around the same time and never came back. If a command id must be tested, test it
+> alone, with a hand on the cable.
+
+The buffer also turns up holding a `0x09` reply that nobody asked for, so the camera
+pushes at least one frame on its own. A 15 s watch with the camera idle caught none, so
+whatever triggers it is not a timer.
+
+The exe builds six of these headers as 32 bit immediates, which is how the list was
+seeded rather than guessed: `a5d00300`, `a5d03000`, `a5d03203`, `a5d04100` and two more.
+Find them again with a scan for `c7 44 24 ?? a5 d0` — `mov dword [rsp+disp], imm32`.
+
+### cmd 0x03, the 40 byte identity block
+
+    00 00 | "083TPP" | 10 ff 28 3a ff ff | 05 01 01
+          | "INSWWYYNPTZXXX" | 07 00 00 | 70 63 00 20 43 8b
+
+`INSWWYYNPTZXXX` is a **serial template, not a serial** — week, year and sequence
+placeholders that were never burned in at the factory. The camera's real serial lives at
+`XU_DEVICE_SN` 0x0c and matches the sticker. `05 01 01` is version shaped and is the best
+candidate for the app's `ptzVersion` field.
+
+For contrast, `XU_DEVICE_INFO` 0x03 (the *selector*, not the command) carries a third
+serial `13B586099180472`, a UUID, and the firmware string `v1.4.5.8_build1`.
+
+### Video mode id 1 is AUTO_COMPOSITION
+
+From `VideoModeType` in the exe, so these are the vendor's own names:
+
+| id | name | id | name |
+|---|---|---|---|
+| 0 | NORMAL_MODE | 7 | AUTOFRAMEING_MODE |
+| 1 | **AUTO_COMPOSITION** | 8 | SMARTWHITEBOARD_MODE |
+| 2 | TRACKING_MODE | 9 | REGIONALTRACK_MODE |
+| 4 | WHITEBOARD_MODE | 10 | SMARTWHITEBOARD_QUERY |
+| 5 | OVERHEAD_MODE | 11 | SMARTWHITEBOARD_CONFIG |
+| 6 | DESKVIEW_MODE | | |
+
+There is no 3. Ids 7 to 11 are almost certainly Link 2 only, but they cost nothing to try.
+
+### DeviceSettingInfo, named field by field
+
+`tools/vendor-proto.txt` holds the whole schema. The installed build defines
+`DeviceSettingInfo` up to **field 55**, which settles part of an old question: the ten
+fields 56 to 65 seen in a `--dump-state` come from the **newer app in the VM**, and
+decoding them needs that build's exe, not this one. Nothing else is missing — every field
+the Linux side cares about has a name now, including `funeTuningValue` (53, the vendor's
+typo), `verScreenLock` (54) and `enableTrackForiddenArea` (55, also theirs).
+
+`WebTransport.proto` also explains how the app's remote protocol reaches the camera:
+`UVCExtendRequest` carries a `ParamType`, a `ControlSelector`, a repeated int32 `data`
+**and a `presetPosIndex`**. So presets are a parameter on an ordinary selector write, not
+a storage area of their own.
+
+### Unit 10 is not a preset store
+
+The old table guessed "preset slot 1/2/3" for unit 10 selectors 0x03 to 0x05. There is no
+evidence for that and some against it:
+
+- All three read zeros for CUR, MIN, MAX, RES and DEF alike. A slot array would show
+  *something* in MAX.
+- Unit 10's GUID sits **immediately after unit 9's** in the exe, inside the vendor's own
+  `deps/UVCCamera/src/win/uvc_camera_win.cc`. It is the second GUID their UVC layer looks
+  for, and the source path is `E:\workspace\puc2\...` — PUC2 is the Link 2 family in the
+  `MettingCameraType` enum. Unit 10 most likely belongs to a later model and is inert here.
+- `PresetPosInfo` is `{name, index}` and `DeviceBasicInfo.curPresetPos` is a single int32.
+  Names are host side. Only the position has to reach the camera.
+
+The live hypothesis for preset save and recall is **0x04 command 0x32**, the one command
+the exe builds with a payload, and it builds it with exactly 3 bytes — enough for an
+operation and an index. Untested: it writes camera state, so it wants a human watching.
+
+### Power-on defaults, read straight after a replug
+
+| Selector | Value | Note |
+|---|---|---|
+| 0x16 `PANTILT_RELATIVE` | `00 03 00 03` | **not** the `00 01 00 01` the vendor app sends to stop. Sign 0 is what halts the gimbal; the magnitude beside it is ignored |
+| 0x1b `FUNC_ENABLE` | `0x0030` | gestures 0x10 and high frame rate 0x20 on, everything else off |
+
+### Position readback stays at zero
+
+`XU_PANTILT_ABSOLUTE` 0x1a reads eight zero bytes in every state tried, before and after
+movement commands. The camera's V4L2 `pan_absolute` and `tilt_absolute` agree — both sit at
+0 — yet both **accept writes** and report the written value back (`pan_absolute=180000`
+reads back as 180000). Whether the motor follows a V4L2 absolute write is unconfirmed; the
+room was too busy for frame differencing to separate a pan from the person in shot.
+
+If the motor does follow, absolute positioning is a far better preset mechanism than
+replaying speed pulses, and the whole unit 10 question stops mattering.
+
+---
+
+## 🧭 2026-09-19, SECOND PASS — THE STATUS REGISTER, AND A BUG THAT BLOCKED VIDEO MODE
+
+### 0x02 XU_VIDEO_MODE is the status register, not just a mode byte
+
+The 52 byte struct carries the **live gimbal position**. Confirmed by driving the gimbal to
+known angles and reading it back, not by inference:
+
+| Offset | Type | Meaning |
+|---|---|---|
+| 0 | u8 | video mode id, `VideoModeType` |
+| 1 | u8 | flags, **unresolved** |
+| 38 | i32 LE | **pan, tenths of a degree** |
+| 42 | i32 LE | **tilt, tenths of a degree** |
+| 50 | u16 LE | zoom, 100 to 400 |
+
+`pan_absolute=90000` (25° in the arcseconds V4L2 uses) reads back as 250. `-90000` reads
+back as -250. A tilt write of 72000 reads back as 200. Arcseconds are the struct value × 360.
+
+Byte 1 was seen as 0x00, 0x01 and 0x10 in the captures and does **not** follow auto
+tracking, smart composition, portrait, HDR or the gesture master bit — all four were toggled
+and watched.
+
+**Reads work with the camera idle.** Only writes need a stream, so a GUI can poll the
+position without holding the device open for video.
+
+### The gimbal moves, and the old position source never did
+
+Two things were unconfirmed for a month and are now settled:
+
+- **Both movement paths work.** A speed write to 0x16 took the gimbal to 65.9°, and
+  `pan_absolute=0` brought it home. No eyes needed — the struct reports it.
+- **`XU_PANTILT_ABSOLUTE` 0x1a is dead.** Eight zero bytes in every state. The vendor app
+  never issues a GET_CUR on it either; the only 0x1a traffic in the captures is the startup
+  MIN/MAX/RES/DEF sweep, all zeros, plus one write of eight zeros.
+
+### ⚠️ The absolute sliders snap back after a speed move
+
+V4L2 `pan_absolute` reads back **whatever was last written to it**, not where the gimbal is.
+Because pan and tilt share one UVC control, the driver read-modify-writes from that stale
+value, so touching either axis yanks the other one back. Measured:
+
+| Step | Real pan | V4L2 thinks |
+|---|---|---|
+| `pan_absolute=90000` | 25.0° | 90000 |
+| `tilt_absolute=36000` | 25.0° | 90000, consistent, nothing moves |
+| speed pan for 1.2 s | **73.9°** | still 90000 |
+| `tilt_absolute=0` | **snaps back to 25.0°** | 90000 |
+
+The fix is to resync the driver's idea of the position from the struct once the gimbal
+settles. Not done — it needs a decision about where to put the write so it does not fight
+the coast.
+
+### 🐛 Every video mode write failed, and the cause was one byte
+
+`insta360_video_mode` had never once been driven through cameractrls. It could not be:
+every write returned **ENOBUFS**.
+
+`to_buf()` wraps `ctypes.create_string_buffer()`, which appends a NUL, so a 52 byte read
+came back as 53 bytes. Video mode is the one control that feeds a read straight back into a
+write — it has to, since the mode is one byte of a struct it must otherwise preserve — so it
+handed the driver 53 bytes for a 52 byte register and uvcvideo rejected the size. Fixed by
+slicing `Insta360Ctrls.query()` to the requested length. All four modes now set and read
+back.
+
+### The exposure curve framing, confirmed from the vendor's own writes
+
+Three chunk writes in the capture decode exactly as this code already builds them:
+
+    [start index byte] [u16 LE, 2 on the first two chunks, 1 on the last] [126 × u16 LE points]
+
+Start indices 0, 126, 252 and 3 + 252 = the 255 byte register. The third chunk's real
+payload is the top of the ramp, 1008, 1012, 1016, 1023, and the rest is the previous
+chunk's tail. All five presets write without error.
+
+Whether they *look* different is still unmeasured: at ISO 3200 and 1/30 in evening light,
+`lift_shadows` moved the frame mean from about 75 to 83 and pulled p95 from 178 to 159,
+which is the right direction, but the scene drifted as much across two identical `linear`
+readings. **Retest in daylight.**
+
+### Two more registers decoded, both read-only in practice
+
+- **0x14 XU_HEAD_LIST**, 244 bytes: `[u8 count][count × 4 × float32 LE]`, a normalised
+  bounding box per detected head. One sample: count 1, box `0.276, 0.0083, 0.263, 0.369`.
+  Room for 15 heads.
+- **0x1c XU_VIDEO_RES**, 10 bytes: `[u32 width][u32 height][u16 fps]` — `1920, 1080, 30`.
+
+### The gimbal speeds the vendor app actually uses
+
+Every 0x16 write in the capture: `00 01 00 01` idle, and magnitudes of only **4 and 8** on
+either axis, either sign. Our range of ±30 is wider than anything the app sends.
+
+---
+
+## 🧾 2026-09-19 — FIELDS 56-65 NAMED, AND A CORRECTION
+
+The app build in the VM is **2.2.4.14**; the one on the Windows partition is **2.0.6.2**.
+That is the whole reason those ten fields looked undecodable — the older schema stops at 55.
+The newer exe is kept at `~/vm/insta360-app-2.2.4.14.exe` and `tools/vendor-proto.txt` is
+now generated from it.
+
+| Field | Type | Matches the live dump |
+|---|---|---|
+| 56 | int32 `audioDirectionMode` | 0 |
+| 57 | `BeautyParam` | four -1 placeholders and `enabled` — beauty sliders, unset |
+| 58 | `MakeupParam` | templateId -1, intensity -1, enabled |
+| 59 | `GreenScreenParam` | **the colour `#00ff00`**, plus intensity, smooth, remove, enhance |
+| 60 | bool `enable4KResolution` | |
+| 61 | bool `supportSuperBokeh` | |
+| 62 | bool `support4KSuperBokeh` | |
+| 63 | int32 `pitch` | |
+| 64 | bool `isVirtualCamera` | |
+| 65 | bool `supportGreenScreen` | |
+
+`GreenScreenParam.color` being exactly the `#00ff00` the dump showed is the confirmation
+that these are the right names.
+
+### The newer app adds nothing that reaches the camera
+
+`ControlSelector` is **byte for byte identical** between 2.0.6.2 and 2.2.4.14. Everything
+new is host side: `ParamType` grows by fifteen — beauty, makeup, green screen, overlays,
+4K, super bokeh — and five new messages appear for background templates and overlay scenes.
+None of it is a new selector.
+
+Two of the new parameters are worth noting anyway. `PARAM_PITCH` has no selector of its own,
+which fits the **third angle field** in the 0x02 struct at offset 46 — the one the app fills
+with the 3610 sentinel alongside pan and tilt. And `PARAM_FRAME_RATE` joins the existing
+high frame rate bit rather than replacing it.
+
+### ⚠️ Correction: the "second independent build" cross-check was weaker than recorded
+
+An earlier note said the 2.2.4.14 enum was "a clean 0-30 list with no aliases", and read
+meaning into the newer build supposedly dropping BLEND_DRAW, AF_MODE and EXPOSURE_CURVE.
+**That difference does not exist.** Reading the enum out of the exe shows all three aliased
+pairs present in both builds, at 8, 15 and 16.
+
+The earlier reading came from the app's web bundle, where protobufjs represents an enum as a
+name-to-number object — and an aliased value simply collapses in that form. The conclusion
+it supported is still true, and now trivially so: every selector matches across both builds,
+because the enum is the same enum. Take schemas from the exe, not from the web bundle.

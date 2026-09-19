@@ -81,6 +81,11 @@ only the GTK GUI and the preview need the packaged build.
 - **A boolean from the command line is the string `'0'`, which is truthy.** Every boolean
   path goes through `to_bool()`. Getting this wrong made `insta360_hdr=0` turn HDR on, and
   the bug came in with PR #101's code.
+- **`to_buf()` returns one byte more than you asked for.** `ctypes.create_string_buffer()`
+  appends a NUL, so `Insta360Ctrls.query()` had to slice back to `length`. Any control that
+  reads a register and writes it back — `insta360_video_mode` is the only one — otherwise
+  hands uvcvideo an oversized payload and **every write fails with ENOBUFS**. It failed
+  silently for a month because nothing else round-trips a read into a write.
 - **usbmon's text interface truncates payloads at 32 bytes.** Anything larger — the 52 byte
   video mode struct, the 255 byte curve, the PTZ commands — needs `tools/usbmon-bin.py`,
   which reads the binary interface. Its header is 48 bytes on the `read()` path; the 64 byte
@@ -92,6 +97,13 @@ only the GTK GUI and the preview need the packaged build.
   command at 0x16 is accepted and reads back correctly, and nothing happens. Same root cause
   as the general write-while-streaming rule, but worth stating separately because the
   register looks fine while the camera sits still.
+- **The gimbal position lives in the video mode struct**, selector 0x02, pan at offset 38
+  and tilt at offset 42 as int32 in tenths of a degree, zoom at 50. `XU_PANTILT_ABSOLUTE`
+  0x1a reads zeros forever and the vendor app never polls it either. Position reads work
+  with the camera idle; only writes need a stream.
+- **V4L2 `pan_absolute` reads back the last value written, not the position.** Pan and tilt
+  share one UVC control, so after a speed move, writing either axis snaps the other back to
+  its stale value. Measured: a speed pan to 73.9° was undone by a tilt write.
 - **Hue is accepted and ignored.** Driving V4L2 hue across its full ±15 moved mean RGB by
   about 1, less than the drift between two readings at the same setting. The other colour
   controls work.
@@ -122,7 +134,7 @@ send timestamps against a usbmon capture have already been wrong once.
 | `insta360_shutter` | ✅ measured | nine stops, halving each time |
 | `insta360_exposure_bias` | ✅ measured | ±3 EV sweep in daylight |
 | `insta360_high_framerate` | ✅ measured | format list gains 50/60 fps and portrait |
-| `insta360_pan_speed` / `_tilt_speed` | ✅ measured, GUI unconfirmed | CLI start/stop moves and halts the gimbal; the GUI slider fixes are untested |
+| `insta360_pan_speed` / `_tilt_speed` | ✅ measured | the gimbal's own position readout confirms a speed write moves it and the stop halts it; GUI sliders still untested |
 | `insta360_track_speed` | ✅ user confirmed | blind A/B, fast vs slow |
 | `insta360_composition` | ✅ user confirmed | head crops tighter than whole body, effect weak at distance |
 | `insta360_gesture_palm` | ✅ user confirmed | A/B, bit off means the gesture stops firing |
@@ -134,38 +146,45 @@ send timestamps against a usbmon capture have already been wrong once.
 | `insta360_privacy_mode` | ⚠️ capture only | same |
 | `insta360_smart_composition` | ⚠️ timestamp only | the weakest evidence class |
 | `insta360_horizontal_correction` | ⚠️ timestamp only | same |
-| `insta360_video_mode` | ⚠️ ids captured | never driven through cameractrls |
-| `insta360_exposure_curve` | ⚠️ protocol only | chunked writes proven on the device, menu presets never selected |
+| `insta360_video_mode` | ✅ measured | all four modes set and read back, after fixing the ENOBUFS bug that blocked every write |
+| `insta360_exposure_curve` | ⚠️ writes clean | all five presets write, framing confirmed against the vendor's capture, visual effect still unmeasured |
 
-Also unconfirmed, all added 2026-09-19: the position poll, the scroll-stop guard, and the
-dead V4L2 speed controls disappearing.
+Also unconfirmed, all added 2026-09-19: the scroll-stop guard and the dead V4L2 speed
+controls disappearing. The position poll was **rewritten** — it used to read V4L2
+`pan_absolute`, which never updates; it now reads the extension unit, which does.
 
 ### Task at hand
 
-Verified by hand on 2026-09-19: the gimbal speed controls through `cameractrls.py -c`, and
-the portrait bit, which turned out to be mislabelled.
+Both remaining "never driven through cameractrls" items were driven on 2026-09-19, and one
+of them was broken:
 
-Still not driven through cameractrls even once:
+1. `insta360_video_mode` — **fixed and working**. Every write had been failing with ENOBUFS
+   because `Insta360Ctrls.query()` returned one byte more than the register holds. All four
+   modes now set and read back.
+2. `insta360_exposure_curve` — all five presets write without error, and the chunk framing
+   was independently confirmed against the vendor's own capture. Whether they *look*
+   different is still unmeasured; the test needs daylight.
 
-1. `insta360_video_mode` — read path and the byte-0-in-52-byte-struct write path
-2. `insta360_exposure_curve` — the chunked protocol is confirmed on the device, but the five
-   menu presets have never been selected
-
-Bits named only by lining send timestamps up against a usbmon capture, never confirmed by
-watching the camera: **smart composition, horizontal correction, composition style**. The
-portrait correction above came from exactly this gap.
+What still needs a person watching the image: **smart composition, horizontal correction,
+composition style**, plus the visual effect of the video modes and the curve presets. Those
+bits were named by lining send timestamps up against a usbmon capture, which is how the
+portrait bit came to be mislabelled.
 
 ```bash
 D=/dev/v4l/by-id/usb-Insta360_Insta360_Link-video-index0
 ffmpeg -nostdin -loglevel error -f v4l2 -input_format mjpeg -video_size 1280x720 \
-  -framerate 30 -i $D -f null - &          # writes need a live stream
+  -framerate 30 -i $D -f null - &          # writes need a live stream, reads do not
 ./cameractrls.py -d $D -c insta360_video_mode=overhead
 ./cameractrls.py -d $D -c insta360_exposure_curve=bright
 ```
 
 ### Next steps, in order
 
-1. **Verify the three paths above**, then drop this list to whatever is left.
+1. **Verify the video mode fix on hardware.** The payload now matches the vendor app byte
+   for byte, including the 3610 "leave the gimbal alone" sentinel; before that every mode
+   change also commanded a move, which is why the modes behaved oddly. Untested since the
+   change. Then the remaining bits that need a person watching: smart composition,
+   horizontal correction, composition style, and the curve presets in daylight.
 2. **One small upstream PR: the PTZ key handler guard.** This is the only fix here that is a
    genuine upstream bug, verified against `upstream/main` (6f38825). `V4L2_CTRL_ZEROERS`
    includes `ZOOM_CONTINUOUS`, the GUI attaches `handle_ptz_speed_key_pressed` to *any*
@@ -190,11 +209,30 @@ ffmpeg -nostdin -loglevel error -f v4l2 -input_format mjpeg -video_size 1280x720
    they modelled it before proposing ours, since it is the same shape of problem.
 5. **Force-push `insta360`.** It was rebased onto upstream main, so `origin/insta360` has
    diverged. Backup ref: `insta360-pre-rebase-backup`.
-6. **Open leads**, all needing the Windows app in a VM plus a usbmon capture:
-   - presets, unit 10 selectors 0x03-0x05, currently reading zeros
-   - `0x04 XU_PTZ_CMD`, a 262 byte command channel seen once as `a5 d0 03 00 f1 32 ...`
-   - video mode id 1, observed once and unidentified
-   - the ten `DeviceSettingInfo` fields (56-65) the app's own web client does not decode
+6. **Open leads.** Four were closed on 2026-09-19 without the VM, see the 0x04 section
+   in `insta360.md`:
+   - `0x04 XU_PTZ_CMD` is **mapped** — `a5 d0 cmd len crc` + payload, an unsupported command
+     answers `0xff`, and thirteen commands exist. The CRC is recovered from the exe and
+     reproduces the vendor's bytes exactly; gen 1 ignores it, Link 2 may not
+   - video mode id 1 is **AUTO_COMPOSITION**, from the vendor's own `VideoModeType` enum
+   - unit 10 is **not presets** — it is the second GUID the vendor's UVC layer looks for,
+     and the source path around it says PUC2, the Link 2 family
+   - `DeviceSettingInfo` fields **56-65 are named** — beauty, makeup, green screen, 4K,
+     bokeh, pitch. All host-side compositing; the newer app adds **no new XU selector**
+
+   The position question is also answered: **a `pan_absolute` write does drive the motor**,
+   and the gimbal's real position is in the 0x02 struct, not in 0x1a.
+
+   **Presets are host side.** A capture of the vendor app saving and recalling one shows no
+   0x04 traffic at all: it writes the stored position into the 0x02 struct and re-sends the
+   exposure curve. The camera stores nothing. The 0x32 hypothesis is dead.
+
+   Still open:
+   - **which 0x04 command makes the gimbal run away.** Do not sweep the range again to find
+     out; test one id at a time, with a hand on the cable
+   - byte 1 of the 0x02 struct, the last unnamed field on the camera side. Seen as 0x00,
+     0x01 and 0x10; it follows none of auto tracking, smart composition, portrait, HDR or
+     the gesture master bit
 7. **Not reachable, stop looking.** Horizontal fine-tuning, smart adjustment, mirror H/V,
    audio capture modes and the rock/OK gestures produce **zero** bus traffic when driven
    through the vendor's own protocol. The app does them host-side or the gen 1 firmware
@@ -209,6 +247,7 @@ Everything needed to continue is in this repo. These sit outside it and are refe
 | `../Screenshot 2025-12-10 2005*.png` | 8 shots of the Windows app UI, the source of the option inventory | originals also at `/mnt/winos/Users/DanielSrb/Downloads/` |
 | `~/vm/cap*.txt`, `~/vm/xu*.txt` | raw usbmon captures, ~23MB | the findings are all transcribed into `insta360.md`; only re-capture if a new selector is needed |
 | `~/vm/win11.qcow2` | the Windows VM with the vendor app installed | needed only for the discovery rig below |
+| `~/vm/insta360-app-2.2.4.14.exe` | the **newer** app build, pulled out of the VM | `tools/vendor-proto.txt` was generated from it; the partition copy is 2.0.6.2 and stops at `DeviceSettingInfo` field 55 |
 | `/mnt/winos/Program Files/Insta360 Link Controller/` | the app binary the protobuf enums came from | the extracted enums are in `insta360.md` |
 
 The vendor default exposure curve was the one thing that existed *only* in a capture; it is
@@ -247,6 +286,8 @@ No build step required - pure Python with direct execution:
 # Insta360 Link research tools, see tools/README.md
 ./tools/insta360-ctrl.py               # Standalone read/set of the confirmed selectors
 ./tools/daylight-probe.py              # Measure a selector against frame statistics
+./tools/xu-probe.py --scan             # Raw read/write of any selector on any unit
+./tools/extract-proto.py               # The vendor app's protobuf schema, straight from the exe
 ./tools/insta360-ws.py --dump-state --url '<qr url>'   # The app's own remote protocol
 ```
 
