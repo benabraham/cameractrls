@@ -550,7 +550,17 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
     def handle_ptz_speed_key_pressed(self, w, e):
         keyval = e.keyval
         state = e.state
-        # a camera can expose one axis without the other, or neither
+        if self.handle_ptz_speed_keys(keyval):
+            return True
+        if self.zoom_absolute_sc is not None:
+            return self.handle_ptz_key_pressed_zoom(keyval, state)
+        return False
+
+    # zoom_continuous is a zeroer too, so this handler is bound to sliders with no pan or
+    # tilt behind them, and a camera can expose one axis without the other. Report "not
+    # handled" rather than dereferencing a slider that was never created; the caller then
+    # falls through to the zoom keys.
+    def handle_ptz_speed_keys(self, keyval):
         if self.pan_speed_sc is None or self.tilt_speed_sc is None:
             return False
         pan_lower = self.pan_speed_sc.get_adjustment().get_lower()
@@ -578,8 +588,6 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
         elif keyval == Gdk.KEY_KP_Page_Up:
             self.pan_speed_sc.set_value(pan_upper)
             self.tilt_speed_sc.set_value(tilt_upper)
-        elif self.zoom_absolute_sc is not None:
-            return self.handle_ptz_key_pressed_zoom(keyval, state)
         else:
             return False
         return True
@@ -650,6 +658,8 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
 
     def handle_ptz_speed_key_released(self, w, e):
         keyval = e.keyval
+        if self.pan_speed_sc is None or self.tilt_speed_sc is None:
+            return False
 
         if keyval in [Gdk.KEY_Left, Gdk.KEY_Right, Gdk.KEY_KP_Left, Gdk.KEY_KP_Right, Gdk.KEY_a, Gdk.KEY_d]:
             self.pan_speed_sc.set_value(0)

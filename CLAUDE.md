@@ -186,7 +186,14 @@ ffmpeg -nostdin -loglevel error -f v4l2 -input_format mjpeg -video_size 1280x720
    change. Then the remaining bits that need a person watching: smart composition,
    horizontal correction, composition style, and the curve presets in daylight.
 2. **One small upstream PR: the PTZ key handler guard.** This is the only fix here that is a
-   genuine upstream bug, verified against `upstream/main` (6f38825). `V4L2_CTRL_ZEROERS`
+   genuine upstream bug, re-verified against `upstream/main` (still 6f38825 on 2026-09-19).
+   **Issue #91 is not it** — that one is an AnkerWork C310 FOV menu `ValueError` in
+   `AnkerWorkCtrls.setup_ctrls`, unrelated. So nothing upstream describes this crash.
+   The fix has to cover **both** handlers: guarding only `key_pressed` leaves
+   `key_released` to raise on the very next event, which is the shape our branch shipped
+   until 2026-09-19. It must also not swallow the zoom keys — `handle_ptz_speed_key_pressed`
+   falls through to `handle_ptz_key_pressed_zoom`, so an early return disables zoom for
+   exactly the camera that triggers the bug. `V4L2_CTRL_ZEROERS`
    includes `ZOOM_CONTINUOUS`, the GUI attaches `handle_ptz_speed_key_pressed` to *any*
    zeroer slider, and the handler unconditionally dereferences `self.pan_speed_sc`. A camera
    with continuous zoom and no pan/tilt speed raises `AttributeError` on an arrow key.
