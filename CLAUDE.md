@@ -54,27 +54,65 @@ rename or renumber them from inference — see "How the names were recovered" in
   the USB bus. Check whether the hubs went with it before suspecting the device.
 - **GET_MIN / GET_MAX are unreliable.** 0x09 reports ±4 when the real range is ±300.
 
+### How this reaches the system
+
+The NixOS config consumes this branch as a flake input, so a change is not testable until it
+is pushed:
+
+1. commit and push to `insta360`
+2. in `~/nixos`: `nix flake update cameractrls-insta360`, and **commit `flake.lock`**
+3. ask the user to run the rebuild — the assistant cannot run it
+
+`configuration.nix` overrides the nixpkgs package's `src` with the input. Going through the
+package matters: it rewrites `cameraview.py`'s `find_library('SDL2-2.0')` call with a store
+path, so running this source directly has **no preview**. A local path cannot be used,
+pure flake evaluation rejects it.
+
+For quick iteration without a rebuild, `cameractrls.py -c` works straight from the checkout;
+only the GTK GUI and the preview need the packaged build.
+
+### Camera quirks that are not bugs in this code
+
+- **The gimbal does not move at all unless something is streaming.** The relative move
+  command at 0x16 is accepted and reads back correctly, and nothing happens. Same root cause
+  as the general write-while-streaming rule, but worth stating separately because the
+  register looks fine while the camera sits still.
+- **Hue is accepted and ignored.** Driving V4L2 hue across its full ±15 moved mean RGB by
+  about 1, less than the drift between two readings at the same setting. The other colour
+  controls work.
+- **The gimbal coasts** roughly 6° after a stop, which is why the position poll keeps running
+  for three seconds after the speed returns to zero.
+
+### GUI behaviour worth knowing before changing it
+
+- The speed sliders are `zeroer`: releasing the mouse returns them to zero, which is what
+  stops the gimbal. **Scrolling a slider never produces a button release**, so that path had
+  to be handled separately or the camera kept panning forever.
+- Absolute pan and tilt are polled while a speed is non-zero. Movement over the extension
+  unit emits no `V4L2_EVENT_CTRL`, so the GUI has nothing to react to and the sliders would
+  show a stale position.
+- The camera's own V4L2 `pan_speed` and `tilt_speed` are dropped when `Insta360Ctrls` loads.
+  It advertises them, reports a zero range, then fails every write with EIO.
+
 ### Task at hand
 
-Three code paths are implemented but have **never been exercised against hardware**, because
-the camera went offline right after they were written. Everything they rest on is verified;
-it is the cameractrls plumbing that has not run.
+Verified by hand on 2026-09-19: the gimbal speed controls through `cameractrls.py -c`, and
+the portrait bit, which turned out to be mislabelled.
 
-1. `insta360_pan_speed` / `insta360_tilt_speed` — the 0x16 protocol is confirmed on the
-   device (a 2 second burst at magnitude 8 swung the gimbal ~40°, reversible), but never
-   through `cameractrls.py -c`.
-2. `insta360_video_mode` — read path and the byte-0-in-52-byte-struct write path.
-3. `insta360_exposure_curve` — the chunked protocol is confirmed (gamma 2.2 vs 0.5 moved p5
-   from 31 to 47 with p95 held), but the five presets have not been driven through the menu.
+Still not driven through cameractrls even once:
 
-To verify, with the monitor on so the camera is present:
+1. `insta360_video_mode` — read path and the byte-0-in-52-byte-struct write path
+2. `insta360_exposure_curve` — the chunked protocol is confirmed on the device, but the five
+   menu presets have never been selected
+
+Bits named only by lining send timestamps up against a usbmon capture, never confirmed by
+watching the camera: **smart composition, horizontal correction, composition style**. The
+portrait correction above came from exactly this gap.
 
 ```bash
 D=/dev/v4l/by-id/usb-Insta360_Insta360_Link-video-index0
 ffmpeg -nostdin -loglevel error -f v4l2 -input_format mjpeg -video_size 1280x720 \
   -framerate 30 -i $D -f null - &          # writes need a live stream
-./cameractrls.py -d $D -c insta360_pan_speed=8      # gimbal should sweep right
-./cameractrls.py -d $D -c insta360_pan_speed=0      # and stop
 ./cameractrls.py -d $D -c insta360_video_mode=overhead
 ./cameractrls.py -d $D -c insta360_exposure_curve=bright
 ```

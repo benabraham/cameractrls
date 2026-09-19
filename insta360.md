@@ -6,6 +6,18 @@
 - **Firmware**: v1.4.5.8_build1
 - **Serial**: 13B586099180472
 
+## 🎛️ 2026-09-19 — WHAT HANDS-ON TESTING CHANGED
+
+- **0x1b bit 0x0400 is portrait/landscape**, not single tap tracking. See the correction
+  above; it is the one finding that timestamp correlation got wrong.
+- **The gimbal does not move without a live stream.** The 0x16 write is accepted and reads
+  back, the camera stays still.
+- **Hue is accepted and ignored** by this firmware. Full ±15 moves mean RGB by about 1.
+- **The gimbal coasts about 6° after a stop**, measured as pan 60480 → 81720 arc-seconds in
+  the 1.5s after the stop write, then holding.
+- **V4L2 pan_speed and tilt_speed are dead on this camera**: advertised, zero range, EIO on
+  write. cameractrls now drops them when the Insta360 controls load.
+
 ## 🔌 THE CAMERA VANISHES WHEN THE MONITOR IS OFF
 
 On this machine the camera hangs off a USB hub inside the monitor, so **switching the
