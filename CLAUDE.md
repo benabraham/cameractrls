@@ -182,8 +182,9 @@ confirming it may mean borrowing hardware or writing a stub.
 | GTK3: the same three | ⬜ unconfirmed |
 | Both: pan and tilt keys unchanged on a camera that has both axes | ⬜ unconfirmed |
 
-Branch `ptz-key-guard`, one commit on `upstream/main`. It stays local until the table is
-full.
+Branch `ptz-key-guard`, one commit on `upstream/main`, checked out as a git worktree at
+`../upstream-pr` — a sibling of `src/`, outside the repo, so it survives reboots and needs
+no gitignore entry. It stays local until the table is full.
 
 ### Task at hand
 
@@ -298,6 +299,8 @@ Everything needed to continue is in this repo. These sit outside it and are refe
 | `../Screenshot 2025-12-10 2005*.png` | 8 shots of the Windows app UI, the source of the option inventory | originals also at `/mnt/winos/Users/DanielSrb/Downloads/` |
 | `~/vm/cap*.txt`, `~/vm/xu*.txt` | raw usbmon captures, ~23MB | the findings are all transcribed into `insta360.md`; only re-capture if a new selector is needed |
 | `~/vm/win11.qcow2` | the Windows VM with the vendor app installed | needed only for the discovery rig below |
+| `src/.scratch/` | gitignored session leftovers — a PE string-reference resolver, the VM file receiver, the app's web bundle | read its `README.md`; everything reusable was promoted into `tools/` already |
+| `../upstream-pr` | worktree holding the `ptz-key-guard` branch | recreate with `git worktree add ../upstream-pr ptz-key-guard`, the commit lives in the repo |
 | `~/vm/insta360-app-2.2.4.14.exe` | the **newer** app build, pulled out of the VM | `tools/vendor-proto.txt` was generated from it; the partition copy is 2.0.6.2 and stops at `DeviceSettingInfo` field 55 |
 | `/mnt/winos/Program Files/Insta360 Link Controller/` | the app binary the protobuf enums came from | the extracted enums are in `insta360.md` |
 

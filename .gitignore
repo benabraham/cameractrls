@@ -2,3 +2,4 @@ __pycache__
 rust
 .direnv
 .claude/settings.local.json
+.scratch
