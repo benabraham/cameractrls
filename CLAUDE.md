@@ -251,8 +251,15 @@ ffmpeg -nostdin -loglevel error -f v4l2 -input_format mjpeg -video_size 1280x720
    February, the newest three days old (#121, #119, #117), none merged; PR #101 has sat
    since March. PR #117 is an AnkerWork FOV fix and looks like it addresses issue #91. PR #107 adds an HDR control for an Elgato Facecam — read how
    they modelled it before proposing ours, since it is the same shape of problem.
-5. **Force-push `insta360`.** It was rebased onto upstream main, so `origin/insta360` has
-   diverged. Backup ref: `insta360-pre-rebase-backup`.
+5. **`insta360` is pushed and in sync** — `origin/insta360` fast-forwarded on 2026-09-19, no
+   force needed; the post-rebase divergence that used to be noted here was already resolved.
+   Backup ref `insta360-pre-rebase-backup` still exists and can be deleted once nothing here
+   is in doubt.
+
+   The GUI changes on this branch — the position poll and the PTZ key guard — are **only
+   testable after the rebuild**, so the next move is `nix flake update cameractrls-insta360`
+   in `~/nixos`, commit `flake.lock`, and the user runs the rebuild. Push any further doc or
+   code commits *before* that update, or the lock pins a commit that is already behind.
 6. **Open leads.** Four were closed on 2026-09-19 without the VM, see the 0x04 section
    in `insta360.md`:
    - `0x04 XU_PTZ_CMD` is **mapped** — `a5 d0 cmd len crc` + payload, an unsupported command
