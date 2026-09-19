@@ -200,7 +200,8 @@ ffmpeg -nostdin -loglevel error -f v4l2 -input_format mjpeg -video_size 1280x720
    Present in both GTK3 and GTK4. Nothing open upstream describes it — searches for
    `zoom_continuous` and `AttributeError` return zero. Read issue #91 "ValueError with GTK
    client" first in case it is the same crash reported vaguely.
-3. **Comment on PR #101, do not open a competing PR.** Two of the fixes on this branch are
+3. **Comment on PR #101, do not open a competing PR.** A draft is written and waiting at
+   `~/vm/pr101-comment.md`. Two of the fixes on this branch are
    *not* upstream bugs and must not be presented as such:
    - the `to_bool()` fix belongs to **PR #101's own unmerged code** (`hdr=0` turned HDR on,
      because the string `'0'` is truthy). It is theirs to fix; upstream `main` has no
@@ -211,8 +212,9 @@ ffmpeg -nostdin -loglevel error -f v4l2 -input_format mjpeg -video_size 1280x720
    What is worth telling #101: their Link 2 selector guesses are **confirmed correct on gen 1
    hardware**, their gesture controls are never placed on a `CtrlPage` so they fall through
    to Advanced/Other, and the protobuf-enum extraction trick removes the guesswork entirely.
-4. **Expect upstream to be slow.** Five PRs are open, oldest from February 2026, none merged;
-   PR #101 has sat since March. PR #107 adds an HDR control for an Elgato Facecam — read how
+4. **Expect upstream to be slow.** Checked 2026-09-19: **eight** PRs open, the oldest from
+   February, the newest three days old (#121, #119, #117), none merged; PR #101 has sat
+   since March. PR #117 is an AnkerWork FOV fix and looks like it addresses issue #91. PR #107 adds an HDR control for an Elgato Facecam — read how
    they modelled it before proposing ours, since it is the same shape of problem.
 5. **Force-push `insta360`.** It was rebased onto upstream main, so `origin/insta360` has
    diverged. Backup ref: `insta360-pre-rebase-backup`.
