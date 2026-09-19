@@ -1200,24 +1200,40 @@ operation and an index. Untested: it writes camera state, so it wants a human wa
 
 ### How far the gimbal actually turns
 
-V4L2 reports angles in arcseconds, and the mapping to the struct's tenths of a degree is
-exactly 1:1 — commanded 20°, 45°, 90° and 130° all arrive dead on. What is *not* right is the
-range the camera advertises:
+**Level the camera before measuring.** The gimbal holds itself level against gravity, so the
+angles it reports are in world coordinates while its mechanical limits are fixed in the base.
+Tilt the base and the whole reachable window swings as a cosine of pan — measured on a
+monitor mount leaning about 20° forward, the tilt ceiling ran from +67.8° facing front to
++100.0° at either pan extreme, which looks like a fascinating property of the camera and is
+really a measurement of the mount.
 
-| Axis | V4L2 advertises | Actually reaches |
-|---|---|---|
-| pan | ±145.0° | **+136.7° / -137.5°** |
-| tilt up | +100.0° | **+67.6°** |
-| tilt down | -90.0° | **-69.4°** |
+With the camera sitting level, the window stops moving:
 
-Repeated twice by absolute command and once more by holding a speed against the stop; all
-three agree. **An earlier note here said +41.4° up — that was wrong**, a position read taken
-while the gimbal was still travelling. Six seconds is not enough to settle a full sweep.
+| Pan | Tilt ceiling | Tilt floor | Span |
+|---|---|---|---|
+| 0° | +89.8° | -47.4° | 137.2° |
+| -90° | +91.8° | -45.5° | 137.3° |
+| +90° | +94.0° | -43.4° | 137.4° |
+| -139° | +90.4° | -42.9° | 133.3° |
+| +140° | +93.3° | -41.3° | 134.6° |
 
-So the axis is close to symmetric, ±68°, and the camera advertises roughly half again as
-much as it has. The published specs are no help: Insta360's marketing says "pan almost 360°"
-and "tilt 90°", and their own naming calls the *portrait rotation* the tilt axis, so the
--90/+100 the camera reports over UVC may describe a different axis entirely.
+So the real envelope is **pan ±139°, tilt +90° to -45°**, and the tilt span is a rigid 137°
+wherever you point it. The remaining 4° of drift across the table is the base still not being
+perfectly level.
+
+Against what the camera advertises over V4L2 — pan ±145°, tilt -90° to +100° — it is short at
+both ends of tilt, and by a lot at the bottom: -45° against -90° claimed. The mapping itself
+is exact, arcseconds are degrees × 3600, linear right up to the stop.
+
+Two things that cost measurements before this was understood:
+
+- **A full sweep needs about ten seconds to settle.** A six second wait once produced +41.4°,
+  read while the gimbal was still travelling, and it went into this file as a limit.
+- **Do not hold a speed against a stop.** Six seconds of that pushed the gimbal back up 33°
+  and dragged pan 4° off, and the position readout followed it — the motors slip rather than
+  stall. Command an absolute angle and wait instead.
+
+The gimbal is also **back-driveable**: turn it by hand and the reported position follows.
 
 ### The tilt speed runs backwards from the tilt angle
 

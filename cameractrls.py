@@ -2881,8 +2881,8 @@ class V4L2Ctrls:
 
                 # V4L2 angles are arcseconds, which nobody reads a gimbal in. Measured on the
                 # Insta360 Link gen 1: the mapping is exactly 1:1 with degrees up to the
-                # mechanical stop, pan +-137 and tilt +-68 — both well inside the range the
-                # camera advertises here.
+                # mechanical stop: pan +-139, tilt +90 to -45 with the camera sitting level.
+                # It levels against gravity, so a tilted base swings that window with pan.
                 if qctrl.id in [V4L2_CID_PAN_ABSOLUTE, V4L2_CID_TILT_ABSOLUTE]:
                     v4l2ctrl.format_value = lambda s,v: f'{v / 3600:.1f}°'
 

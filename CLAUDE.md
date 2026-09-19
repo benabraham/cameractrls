@@ -104,10 +104,15 @@ only the GTK GUI and the preview need the packaged build.
 - **V4L2 `pan_absolute` reads back the last value written, not the position.** Pan and tilt
   share one UVC control, so after a speed move, writing either axis snaps the other back to
   its stale value. Measured: a speed pan to 73.9° was undone by a tilt write.
-- **The advertised pan and tilt range is too generous.** V4L2 says pan ±145° and tilt
-  -90°..+100°; measured, the gimbal stops at ±137° pan and **±68°** tilt (+67.6 / -69.4),
-  confirmed three ways. Allow ten seconds for a full sweep to settle before reading the
-  position — a six second wait once produced a bogus +41°, read mid-travel. The mapping itself
+- **The gimbal levels against gravity, so measure its range with the camera level.** Angles
+  are reported in world coordinates while the mechanical limits sit in the base, so a tilted
+  mount swings the whole reachable window as a cosine of pan. On a monitor leaning ~20°
+  forward the tilt ceiling appeared to run from +68° to +100° with pan; level, it is flat.
+  Real envelope: **pan ±139°, tilt +90° to -45°**, tilt span a rigid 137°. V4L2 advertises
+  ±145° and -90°..+100°, which is optimistic at the bottom by 45°.
+- **Allow ten seconds for a full sweep to settle**, and **never hold a speed against a stop**
+  — six seconds of that pushed the gimbal 33° back and dragged pan 4° off. The motors slip.
+  The gimbal is back-driveable by hand and the readout follows. The mapping itself
   is exact — arcseconds are degrees × 3600, linear to the stop — so the sliders now display
   degrees via `format_value`. The bounds are left as the camera reports them.
 - **The level compensation slider in the Windows app is host-side.** `XU_BIAS` 0x18 takes a
