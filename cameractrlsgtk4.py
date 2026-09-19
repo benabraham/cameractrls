@@ -578,8 +578,16 @@ class CameraCtrlsWindow(Gtk.ApplicationWindow):
             self.ptz_poll_id = GLib.timeout_add(250, self.poll_ptz_position)
 
     def poll_ptz_position(self):
+        # On the Insta360 Link the V4L2 control only echoes the last value written to it, so
+        # the position has to come out of the extension unit instead.
+        position = self.camera.insta360_ctrls.read_pantilt_position()
         for text_id in ('pan_absolute', 'tilt_absolute'):
-            ctrl = self.camera.v4l_ctrls.refresh_ctrl_value(text_id)
+            if position is None:
+                ctrl = self.camera.v4l_ctrls.refresh_ctrl_value(text_id)
+            else:
+                ctrl = find_by_text_id(self.camera.v4l_ctrls.get_ctrls(), text_id)
+                if ctrl is not None:
+                    ctrl.value = position[text_id]
             if ctrl is not None and ctrl.gui_value_set:
                 ctrl.gui_value_set(ctrl.value)
 

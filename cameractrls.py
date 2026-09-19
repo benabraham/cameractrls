@@ -2180,6 +2180,31 @@ INSTA360_VIDEO_MODE_WHITEBOARD = 4
 INSTA360_VIDEO_MODE_OVERHEAD = 5
 INSTA360_VIDEO_MODE_DESKVIEW = 6
 
+## The same 52 byte struct doubles as the gimbal's status register: absolute pan and tilt
+## sit in it as signed int32 in tenths of a degree, zoom as uint16 percent. This is the only
+## live position on this camera — V4L2 PAN_ABSOLUTE reads back whatever was last written to
+## it, and XU_PANTILT_ABSOLUTE 0x1a reads zero forever. Unlike every write, it works with
+## the camera idle.
+INSTA360_VIDEO_MODE_PAN_OFFSET = 38
+INSTA360_VIDEO_MODE_TILT_OFFSET = 42
+INSTA360_VIDEO_MODE_ROLL_OFFSET = 46
+INSTA360_VIDEO_MODE_ZOOM_OFFSET = 50
+INSTA360_DECIDEGREE_TO_ARCSEC = 360
+
+## Writing the struct also commands a move, so a mode change has to say "leave the gimbal
+## alone". The vendor app does that with 3610 — an impossible 361.0 degrees — in all three
+## angles, and zero zoom. Echoing the current position back instead, which is the obvious
+## thing to do, makes the camera re-aim every time the mode changes.
+INSTA360_ANGLE_UNCHANGED = 3610
+
+def insta360_video_mode_payload(mode):
+    payload = bytearray(INSTA360_VIDEO_MODE_LENGTH)
+    payload[0] = mode
+    for offset in (INSTA360_VIDEO_MODE_PAN_OFFSET, INSTA360_VIDEO_MODE_TILT_OFFSET,
+                   INSTA360_VIDEO_MODE_ROLL_OFFSET):
+        payload[offset:offset + 4] = INSTA360_ANGLE_UNCHANGED.to_bytes(4, 'little')
+    return bytes(payload)
+
 ## Composition (XU_LAYOUT_STYLE_CONTROL, selector 0x13, 1 byte)
 INSTA360_COMPOSITION_SELECTOR = 0x13
 INSTA360_COMPOSITION_LENGTH = 1
@@ -2257,10 +2282,13 @@ class Insta360Ctrls:
     def supported(self):
         return self.unit_id != 0 and self.usb_ids in INSTA360_DEV_MATCH
 
+    # to_buf() appends a NUL, so the raw buffer is one byte longer than the register. Slice
+    # it off: a read that feeds a write back — insta360_video_mode does — otherwise hands the
+    # driver a payload one byte too long and every SET_CUR fails with ENOBUFS.
     def query(self, selector, length, query):
         buf = to_buf(bytes(length))
         query_xu_control(self.fd, self.unit_id, selector, query, buf)
-        return bytes(buf)
+        return bytes(buf)[:length]
 
     def read(self, selector, length):
         return self.query(selector, length, UVC_GET_CUR)
@@ -2625,10 +2653,7 @@ class Insta360Ctrls:
                 if ctrl.text_id == 'insta360_exposure_curve':
                     self.write_exposure_curve(insta360_curve_points(menu.value))
                 elif ctrl.text_id == 'insta360_video_mode':
-                    # the mode id rides in byte 0, the rest of the struct stays as it is
-                    payload = bytearray(self.read(ctrl.selector, ctrl.length))
-                    payload[0] = menu.value
-                    self.write(ctrl.selector, bytes(payload))
+                    self.write(ctrl.selector, insta360_video_mode_payload(menu.value))
                 else:
                     self.write(ctrl.selector, menu.value.to_bytes(ctrl.length, byteorder='little'))
                 ctrl.value = v
@@ -2697,6 +2722,23 @@ class Insta360Ctrls:
             else:
                 payload += bytes([0x00, 0x01])      # the vendor app's idle encoding
         self.write(INSTA360_PANTILT_RELATIVE_SELECTOR, bytes(payload))
+
+    # Where the sliders have to look to see the gimbal move, in the arcseconds V4L2 uses.
+    def read_pantilt_position(self):
+        if not self.supported():
+            return None
+        buf = self.read(INSTA360_VIDEO_MODE_SELECTOR, INSTA360_VIDEO_MODE_LENGTH)
+        if buf is None or len(buf) < INSTA360_VIDEO_MODE_LENGTH:
+            return None
+
+        def deg(offset):
+            raw = buf[offset:offset + 4]
+            return int.from_bytes(raw, byteorder='little', signed=True) * INSTA360_DECIDEGREE_TO_ARCSEC
+
+        return {
+            'pan_absolute': deg(INSTA360_VIDEO_MODE_PAN_OFFSET),
+            'tilt_absolute': deg(INSTA360_VIDEO_MODE_TILT_OFFSET),
+        }
 
     def get_ctrls(self):
         return self.ctrls
@@ -3739,7 +3781,7 @@ class CameraCtrls:
         self.fd = fd
         self.v4l_ctrls = V4L2Ctrls(device, fd)
         self.fmt_ctrls = V4L2FmtCtrls(device, fd)
-        insta360_ctrls = Insta360Ctrls(device, fd)
+        self.insta360_ctrls = Insta360Ctrls(device, fd)
         self.ctrls = [
             self.v4l_ctrls,
             self.fmt_ctrls,
@@ -3747,7 +3789,7 @@ class CameraCtrls:
             LogitechCtrls(device, fd),
             DellUltraSharpCtrls(device, fd),
             AnkerWorkCtrls(device, fd),
-            insta360_ctrls,
+            self.insta360_ctrls,
             SystemdSaver(self),
             ColorPreset(self),
             ConfigPreset(self),
@@ -3757,7 +3799,7 @@ class CameraCtrls:
         # The Insta360 Link advertises V4L2 pan and tilt speed, then reports a zero range and
         # fails every write with EIO. Drop those dead sliders, insta360_pan_speed and
         # insta360_tilt_speed drive the gimbal instead.
-        if insta360_ctrls.supported():
+        if self.insta360_ctrls.supported():
             pop_list_by_ids(self.v4l_ctrls.get_ctrls(), [V4L2_CID_PAN_SPEED, V4L2_CID_TILT_SPEED])
 
     def has_ptz(self):
