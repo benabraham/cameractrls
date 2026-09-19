@@ -61,7 +61,12 @@ is pushed:
 
 1. commit and push to `insta360`
 2. in `~/nixos`: `nix flake update cameractrls-insta360`, and **commit `flake.lock`**
-3. ask the user to run the rebuild — the assistant cannot run it
+3. ask the user to run the rebuild — **the assistant must never run it**, it is blocked
+   by a hook and by that repo's own rules
+
+The NixOS config is a separate repo at `~/nixos` with its own CLAUDE.md, which will not
+be loaded when working here. What matters from it: the rebuild command is the user's to
+run, and `flake.lock` is committed there, not here.
 
 `configuration.nix` overrides the nixpkgs package's `src` with the input. Going through the
 package matters: it rewrites `cameraview.py`'s `find_library('SDL2-2.0')` call with a store
