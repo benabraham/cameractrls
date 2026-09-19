@@ -1200,40 +1200,50 @@ operation and an index. Untested: it writes camera state, so it wants a human wa
 
 ### How far the gimbal actually turns
 
-**Level the camera before measuring.** The gimbal holds itself level against gravity, so the
-angles it reports are in world coordinates while its mechanical limits are fixed in the base.
-Tilt the base and the whole reachable window swings as a cosine of pan — measured on a
-monitor mount leaning about 20° forward, the tilt ceiling ran from +67.8° facing front to
-+100.0° at either pan extreme, which looks like a fascinating property of the camera and is
-really a measurement of the mount.
+Three things, and the third is why every naive measurement of this is wrong:
 
-With the camera sitting level, the window stops moving:
+1. The mechanical tilt range is **fixed in the base**: about **+90° to -45°** relative to the
+   base plate, a rigid **137° span**.
+2. The angles the camera reports are **world referenced** — the gimbal holds its attitude
+   against gravity, so tilting the base under it barely moves the number.
+3. Therefore the reachable window is that mechanical range **shifted by however far the base
+   leans**, and then clipped to the control range the camera advertises, -90° to +100°.
 
-| Pan | Tilt ceiling | Tilt floor | Span |
-|---|---|---|---|
-| 0° | +89.8° | -47.4° | 137.2° |
-| -90° | +91.8° | -45.5° | 137.3° |
-| +90° | +94.0° | -43.4° | 137.4° |
-| -139° | +90.4° | -42.9° | 133.3° |
-| +140° | +93.3° | -41.3° | 134.6° |
+Measured at pan 0, moving the base by hand between runs:
 
-So the real envelope is **pan ±139°, tilt +90° to -45°**, and the tilt span is a rigid 137°
-wherever you point it. The remaining 4° of drift across the table is the base still not being
-perfectly level.
+| Base attitude | Ceiling | Floor |
+|---|---|---|
+| level | +89.8° — straight up, confirmed by eye | -47.4° |
+| tilted back | **+100.0°**, the control clamp | — |
+| leaning ~20° forward (monitor mount) | +67.8° | -69.3° |
+| leaning ~45° forward | +43.0° | **-90.0°**, the control clamp |
 
-Against what the camera advertises over V4L2 — pan ±145°, tilt -90° to +100° — it is short at
-both ends of tilt, and by a lot at the bottom: -45° against -90° claimed. The mapping itself
-is exact, arcseconds are degrees × 3600, linear right up to the stop.
+The 45° case was a prediction before it was a measurement: lean forward by θ and the ceiling
+should land near 90° - θ, the floor near -45° - θ. It gave +43.0° and -90.0°, both ends
+within 2°.
 
-Two things that cost measurements before this was understood:
+So the camera is **not** short of what it advertises. `-90°..+100°` is the control range, and
+every part of it is reachable — just not from one base attitude. Level, the mechanical
+ceiling lands exactly on straight up, which is the sensible place for it to stop.
+
+The same reasoning explains the pan-dependent ceiling measured earlier on the monitor mount
+(+67.8° facing front rising to +100° at the pan extremes): as the camera turns, the base lean
+stops opposing the tilt axis, so the window swings back up. On a level base that effect
+disappears — ceilings of 89.8 / 91.8 / 94.0 / 90.4 / 93.3 across five pan angles, flat within
+the few degrees the base was still off level.
+
+**Pan** is ±139°, and unaffected by any of this.
+
+Three method traps, all of which cost a wrong number in this file first:
 
 - **A full sweep needs about ten seconds to settle.** A six second wait once produced +41.4°,
-  read while the gimbal was still travelling, and it went into this file as a limit.
-- **Do not hold a speed against a stop.** Six seconds of that pushed the gimbal back up 33°
-  and dragged pan 4° off, and the position readout followed it — the motors slip rather than
-  stall. Command an absolute angle and wait instead.
+  read mid-travel, and it went in as a limit.
+- **Do not hold a speed against a stop.** Six seconds of that pushed the gimbal back 33° and
+  dragged pan 4° off — the motors slip rather than stall. Command an angle and wait.
+- **Level the camera before quoting any tilt figure.** Otherwise the number describes the
+  mount.
 
-The gimbal is also **back-driveable**: turn it by hand and the reported position follows.
+The gimbal is **back-driveable**: turn it by hand and the reported position follows.
 
 ### The tilt speed runs backwards from the tilt angle
 

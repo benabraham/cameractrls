@@ -104,17 +104,17 @@ only the GTK GUI and the preview need the packaged build.
 - **V4L2 `pan_absolute` reads back the last value written, not the position.** Pan and tilt
   share one UVC control, so after a speed move, writing either axis snaps the other back to
   its stale value. Measured: a speed pan to 73.9° was undone by a tilt write.
-- **The gimbal levels against gravity, so measure its range with the camera level.** Angles
-  are reported in world coordinates while the mechanical limits sit in the base, so a tilted
-  mount swings the whole reachable window as a cosine of pan. On a monitor leaning ~20°
-  forward the tilt ceiling appeared to run from +68° to +100° with pan; level, it is flat.
-  Real envelope: **pan ±139°, tilt +90° to -45°**, tilt span a rigid 137°. V4L2 advertises
-  ±145° and -90°..+100°, which is optimistic at the bottom by 45°.
+- **The tilt range is fixed in the base, the readout is not.** Mechanically the gimbal covers
+  about +90° to -45° relative to its base plate, a rigid 137° span, but it reports angles
+  levelled against gravity. So the reachable window is that span shifted by however far the
+  base leans, clipped to the -90°..+100° the camera advertises. Level, the ceiling is
+  straight up; leaning 45° forward it becomes +43° / -90°, predicted then measured. The
+  camera is **not** short of its advertised range — that range is the union across base
+  attitudes. **Level the camera before quoting any tilt figure**, or the number describes the
+  mount. Pan is ±139° and unaffected.
 - **Allow ten seconds for a full sweep to settle**, and **never hold a speed against a stop**
   — six seconds of that pushed the gimbal 33° back and dragged pan 4° off. The motors slip.
-  The gimbal is back-driveable by hand and the readout follows. The mapping itself
-  is exact — arcseconds are degrees × 3600, linear to the stop — so the sliders now display
-  degrees via `format_value`. The bounds are left as the camera reports them.
+  The gimbal is back-driveable by hand and the readout follows.
 - **The level compensation slider in the Windows app is host-side.** `XU_BIAS` 0x18 takes a
   float32 and echoes it perfectly, and nothing in the image moves — tested at ±5° and 10°
   with the 0x80 correction bit on, against a noise floor of 0.89. There is no camera control
